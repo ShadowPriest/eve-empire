@@ -69,4 +69,4 @@ ESI_USER_AGENT="mytool (contact: you@example.com)" ./sdeimport -db sde.db
 ---
 
 Неофициальный сторонний инструмент. EVE Online и связанные материалы — собственность
-CCP hf.
+Fenris Creations (до мая 2026 — CCP Games).
