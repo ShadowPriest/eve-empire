@@ -1,0 +1,106 @@
+{{define "content"}}
+{{template "empiretabs" "wallets"}}
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{/* the balance tiles ARE the section switcher: the total is selected by
+   default and shows everything, the other two narrow it down */}}
+<div class="card phead">
+  <div class="pheadstats">
+    <div class="pstat pick active" data-wfilter="all">
+      <p class="klabel">Общий баланс</p>
+      <p class="kval isk">{{isk .GrandTotal}}</p>
+      <p class="knote muted">персонажи и корпорации вместе</p>
+    </div>
+    <div class="pstat pick" data-wfilter="chars">
+      <p class="klabel">Персонажи</p>
+      <p class="kval isk">{{isk .CharTotal}}</p>
+      <p class="knote muted">кошельков: {{len .Heads}}</p>
+    </div>
+    <div class="pstat pick" data-wfilter="corps">
+      <p class="klabel">Корпорации</p>
+      <p class="kval isk">{{isk .CorpTotal}}</p>
+      <p class="knote muted">корпораций: {{len .CorpRows}}</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Плексы</p>
+      <p class="kval muted">—</p>
+      <p class="knote muted">плекс-хранилища в ESI нет</p>
+    </div>
+  </div>
+</div>
+
+<div class="wsections">
+  <!-- ── one game-style header per character ── -->
+  <div data-wsection="chars">
+    <h2 class="wsechead">Персонажи <span class="cnt">{{len .Heads}}</span></h2>
+    <div class="wgrid">
+      {{range .Heads}}
+      <a class="whead" href="/characters/{{.ID}}/wallet" data-empire-char="{{.ID}}">
+        <div class="wtop">
+          <img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=64" alt=""
+               class="{{if .Online}}online{{end}}">
+          <div style="min-width:0;">
+            <p class="wnm ell">{{.Name}}</p>
+            <p class="wac muted ell">{{if .Account}}{{.Account}}{{else}}без аккаунта{{end}}</p>
+          </div>
+        </div>
+        <div class="wcard isk-card">
+          <span class="wico">Ƶ</span>
+          <div style="min-width:0;"><p class="wlbl">ISK</p><p class="wval">{{isk .Wallet}}</p></div>
+        </div>
+        <div class="wmini">
+          <span title="Наградные баллы NPC-корпораций"><i class="wico">◈</i>
+            <b>{{.LPCorps}}</b> корп. НБ</span>
+          <span title="EverMarks — баллы Paragon"><i class="wico">✦</i>
+            {{if ge .EverMarks 0}}<b>{{num .EverMarks}}</b>{{else}}<span class="muted">—</span>{{end}} EverMarks</span>
+        </div>
+        {{if .Note}}<p class="wnote muted">{{.Note}}</p>{{end}}
+      </a>
+      {{end}}
+    </div>
+    <p class="muted" style="font-size:.7rem; margin:.8rem 0 0;">
+      плекс-хранилище общее на аккаунт и в ESI не отдаётся; EverMarks — это НБ корпорации «Paragon»</p>
+  </div>
+
+  <!-- ── one header per corporation ── -->
+  <div data-wsection="corps">
+    <h2 class="wsechead">Корпорации <span class="cnt">{{len .CorpRows}}</span></h2>
+    {{if .CorpRows}}
+    <div class="wgrid">
+      {{range .CorpRows}}
+      <a class="whead" href="/corporations/{{.Corp.ID}}/wallets">
+        <div class="wtop">
+          <img src="https://images.evetech.net/corporations/{{.Corp.ID}}/logo?size=64" alt="">
+          <div style="min-width:0;">
+            <p class="wnm ell">{{.Corp.Name}}</p>
+            <p class="wac muted ell">корпорация</p>
+          </div>
+        </div>
+        <div class="wcard isk-card">
+          <span class="wico">Ƶ</span>
+          <div style="min-width:0;">
+            <p class="wlbl">ISK всего</p>
+            <p class="wval">{{if .OK}}{{isk .Total}}{{else}}<span class="muted">{{.Note}}</span>{{end}}</p>
+          </div>
+        </div>
+        {{if .Divisions}}
+        <table class="wdivs">
+          {{range .Divisions}}
+          <tr><td class="ell">{{.Name}}</td><td class="r isk">{{isk .Balance}}</td></tr>
+          {{end}}
+        </table>
+        {{end}}
+        <div class="wmini">
+          <span title="Корпоративных НБ в ESI нет"><i class="wico">◈</i> <span class="muted">— корп. НБ</span></span>
+          <span title="Корпоративных EverMarks в ESI нет"><i class="wico">✦</i> <span class="muted">— EverMarks</span></span>
+        </div>
+      </a>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="muted">Корпораций нет.</p>
+    {{end}}
+  </div>
+</div>
+{{end}}

@@ -1,0 +1,44 @@
+{{define "content"}}
+<h1>Настройки</h1>
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+<h2>Персонажи</h2>
+<p style="margin:.4rem 0 1rem;"><a class="btnlink" href="/login">+ Добавить персонажа</a></p>
+
+{{range .Groups}}
+{{range .Chars}}
+<div class="card maxm setchar" data-id="{{.ID}}" data-name="{{.Name}}">
+  <img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=64" alt=""
+       class="portrait{{if .Online}} online{{end}}" style="width:48px;height:48px;flex:none;">
+  <div class="ci" style="min-width:0;flex:1;">
+    <p style="margin:0;"><a class="alink" href="/characters/{{.ID}}">{{.Name}}</a>
+      {{if .Account}}<span class="muted" style="font-size:.78rem;">· {{.Account}}</span>{{end}}</p>
+    <div class="tagedit" data-id="{{.ID}}">
+      {{range .Tags}}<span class="tag tchip" data-tag="{{.}}">{{.}}<i class="x" title="убрать тег">×</i></span>{{end}}
+      <span class="tag tadd" title="добавить теги">+</span>
+    </div>
+  </div>
+  <form method="post" action="/characters/{{.ID}}/delete"
+        onsubmit="return confirm('Удалить {{.Name}} из кабинета?')">
+    <button class="danger" type="submit">Удалить</button>
+  </form>
+</div>
+{{end}}
+{{end}}
+
+<h2>Язык данных EVE</h2>
+<form method="post" action="/settings/language" class="frow" style="margin:.4rem 0 0;">
+  <select name="language" id="langsel">
+    {{range .Languages}}
+    <option value="{{.Code}}" {{if eq .Code $.Language}}selected{{end}}>{{.Name}}</option>
+    {{end}}
+  </select>
+  <button type="submit">Сохранить</button>
+  <span class="muted" style="font-size:.75rem;">названия предметов, групп и описания из ESI;
+    имена из батч-резолвера (персонажи, системы) всегда на английском</span>
+</form>
+
+<h2>Авторизация</h2>
+<p class="muted" style="font-size:.85rem;">Вход по паролю и выход из кабинета появятся позже.</p>
+{{end}}

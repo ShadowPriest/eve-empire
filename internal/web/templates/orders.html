@@ -1,0 +1,211 @@
+{{define "content"}}
+<h1>Ордера</h1>
+<nav class="tabs">
+  <a href="/tools/ore">Таблица руд</a>
+  <a href="/tools/market">Товары</a>
+  <a class="active">Ордера</a>
+</nav>
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{if .NoSDE}}
+<div class="card">
+  <p class="klabel">Нет статической базы</p>
+  <p class="knote muted">Дерево рынка живёт в sde.db. Собери базу:
+    <code>.\sdeimport.exe -db sde.db</code> — без неё показывать нечего.</p>
+</div>
+{{else}}
+
+<div class="olayout">
+  <div class="card otree">
+    <p class="klabel" style="margin-top:0;">Дерево рынка</p>
+    <div class="otreewrap">{{.TreeHTML}}</div>
+  </div>
+
+  <div class="ocontent">
+    <form class="card bsearch" method="get" action="/tools/orders">
+      <label class="ofield" style="flex:1;">
+        <span class="klabel">Быстрый поиск</span>
+        <input type="text" name="q" value="{{.Query}}" autocomplete="off"
+               placeholder="название предмета — PLEX, Tritanium, топливный блок">
+      </label>
+      <button class="tog on" type="submit">Искать</button>
+    </form>
+
+    {{if .Hits}}
+    <div class="card bhits">
+      <p class="klabel">Нашлось <span class="muted">[{{len .Hits}}]</span></p>
+      <div class="frow bhitrow">
+        {{range .Hits}}
+        <a class="tog{{if eq .TypeID $.TypeID}} on{{end}}"
+           href="/tools/orders?q={{$.Query}}&t={{.TypeID}}">{{.Name}}</a>
+        {{end}}
+      </div>
+    </div>
+    {{else if .Query}}
+    <p class="muted" style="margin-top:1rem;">Ничего не нашлось.</p>
+    {{end}}
+
+    {{if .TypeID}}
+    <div class="card phead">
+      <p class="crumbs">{{range .Crumbs}}<a href="/tools/orders?g={{.ID}}">{{.Name}}</a><span class="muted"> / </span>{{end}}</p>
+      <div class="frow" style="justify-content:space-between;">
+        <p class="kval" style="margin:0;">{{item .TypeID .TypeName}}
+          {{if .Global}}<span class="fnd" title="PLEX торгуется не в регионе, а на глобальном рынке">глобальный рынок</span>
+          {{else}}<span class="muted" style="font-size:.78rem;">Жита · The Forge</span>{{end}}</p>
+        <div class="frow otoggles">
+          <a class="tog{{if ne .View "hist"}} on{{end}}" href="/tools/orders?g={{.GroupID}}&t={{.TypeID}}">Цены</a>
+          <a class="tog{{if eq .View "hist"}} on{{end}}" href="/tools/orders?g={{.GroupID}}&t={{.TypeID}}&v=hist">История цен</a>
+        </div>
+      </div>
+    </div>
+
+    {{if eq .View "hist"}}
+    {{/* ── price history: the game's candle chart or its table ── */}}
+    <div class="card" style="margin-top:1rem;">
+      <div class="frow" style="justify-content:space-between;">
+        <div class="frow otoggles">
+          {{range .HistPeriods}}
+          <a class="tog{{if eq .Days $.HistDays}} on{{end}}"
+             href="/tools/orders?g={{$.GroupID}}&t={{$.TypeID}}&v=hist&hd={{.Days}}{{if $.HistTable}}&hv=t{{end}}">{{.Label}}</a>
+          {{end}}
+        </div>
+        <div class="frow otoggles">
+          <a class="tog{{if not .HistTable}} on{{end}}"
+             href="/tools/orders?g={{.GroupID}}&t={{.TypeID}}&v=hist&hd={{.HistDays}}">В виде графика</a>
+          <a class="tog{{if .HistTable}} on{{end}}"
+             href="/tools/orders?g={{.GroupID}}&t={{.TypeID}}&v=hist&hd={{.HistDays}}&hv=t">В виде таблицы</a>
+        </div>
+      </div>
+
+      {{if not .Hist}}
+      <p class="muted" style="margin-top:1rem;">Истории торгов нет.</p>
+      {{else if .HistTable}}
+      <div class="obookwrap" style="margin-top:.8rem;">
+        <table>
+          <thead><tr><th>Дата</th><th class="r">Кол-во ордеров</th><th class="r">Количество</th>
+            <th class="r">Мин.</th><th class="r">Макс.</th><th class="r">Средн.</th></tr></thead>
+          <tbody>
+          {{range .Hist}}
+          <tr>
+            <td>{{.Date}}</td>
+            <td class="r muted">{{num .OrderCount}}</td>
+            <td class="r">{{num .Volume}}</td>
+            <td class="r">{{unitprice .Lowest}}</td>
+            <td class="r">{{unitprice .Highest}}</td>
+            <td class="r">{{unitprice .Average}}</td>
+          </tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <p class="histlegend">
+        <span><i class="hdot"></i> средняя цена за день</span>
+        <span><i class="hwhisk"></i> мин/макс</span>
+        <span><i class="hma5"></i> скользящее среднее (5д)</span>
+        <span><i class="hma20"></i> скользящее среднее (20д)</span>
+        <span><i class="hdonch"></i> канал Дончиана</span>
+        <span><i class="hvol"></i> объём</span>
+      </p>
+      {{.HistSVG}}
+      {{end}}
+      <p class="knote muted">история дневных свечей региона из ESI, отстаёт на день-два</p>
+    </div>
+
+    {{else}}
+    {{/* ── the live book: sellers on top, buyers below ── */}}
+    {{if .Own}}
+    <div class="card" style="margin-top:1rem;">
+      <h2>Ордера ваших персонажей <span class="muted">[{{len .Own}}]</span></h2>
+      <table>
+        <tr><th>Персонаж</th><th>Тип</th><th class="r">Цена</th><th class="r">Осталось</th><th>Станция</th></tr>
+        {{range .Own}}
+        <tr>
+          <td>{{.CharName}}</td>
+          <td>{{if .IsBuyOrder}}<span class="buy">BUY</span>{{else}}<span class="sell">SELL</span>{{end}}</td>
+          <td class="r">{{unitprice .Price}}</td>
+          <td class="r">{{num .VolumeRemain}}/{{num .VolumeTotal}}</td>
+          <td class="muted ell">{{.LocationName}}</td>
+        </tr>
+        {{end}}
+      </table>
+      <p class="knote muted">эти же ордера подсвечены в стакане ниже; ордера вне The Forge
+        в стакан не попадают</p>
+    </div>
+    {{end}}
+
+    <div class="card" style="margin-top:1rem;" data-oside="sell">
+      <h2><span class="sell">Продавцы</span>
+        <span class="muted">[{{len .Sells}} орд. · {{num .SellVolume}} шт. · от {{unitprice .BestSell}}]</span></h2>
+      <p class="oselsum" data-hint="клик по строке — выделить: посчитаются количество, средняя цена и стоимость">клик
+        по строке — выделить: посчитаются количество, средняя цена и стоимость</p>
+      <div class="obookwrap">
+        <table>
+          <thead><tr><th class="r">Количество</th><th class="r">Цена</th><th>Место</th><th class="r">Истекает через</th></tr></thead>
+          <tbody>
+          {{range .Sells}}
+          <tr data-osel data-oid="{{.OrderID}}" data-q="{{.VolumeRemain}}" data-p="{{printf "%.2f" .Price}}"
+              {{if .Mine}}class="mine" title="ордер персонажа {{.Mine}}"{{end}}>
+            <td class="r">{{num .VolumeRemain}}</td>
+            <td class="r sell">{{unitprice .Price}}</td>
+            <td class="muted ell">{{if .Mine}}<span class="fnd">{{.Mine}}</span> {{end}}{{.LocationName}}</td>
+            <td class="r muted">{{.Expires}}</td>
+          </tr>
+          {{end}}
+          {{if not .Sells}}<tr><td colspan="4" class="muted">ордеров на продажу нет</td></tr>{{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:1rem;" data-oside="buy">
+      <h2><span class="buy">Покупатели</span>
+        <span class="muted">[{{len .Buys}} орд. · {{num .BuyVolume}} шт. · до {{unitprice .BestBuy}}]</span></h2>
+      <p class="oselsum" data-hint="клик по строке — выделить: посчитаются количество, средняя цена и стоимость">клик
+        по строке — выделить: посчитаются количество, средняя цена и стоимость</p>
+      <div class="obookwrap">
+        <table>
+          <thead><tr><th class="r">Количество</th><th class="r">Цена</th><th>Место</th><th>Дистанция</th><th class="r">Мин.</th></tr></thead>
+          <tbody>
+          {{range .Buys}}
+          <tr data-osel data-oid="{{.OrderID}}" data-q="{{.VolumeRemain}}" data-p="{{printf "%.2f" .Price}}"
+              {{if .Mine}}class="mine" title="ордер персонажа {{.Mine}}"{{end}}>
+            <td class="r">{{num .VolumeRemain}}</td>
+            <td class="r buy">{{unitprice .Price}}</td>
+            <td class="muted ell">{{if .Mine}}<span class="fnd">{{.Mine}}</span> {{end}}{{.LocationName}}</td>
+            <td class="muted">{{.RangeLabel}}</td>
+            <td class="r muted">{{if gt .MinVolume 1}}{{num .MinVolume}}{{else}}—{{end}}</td>
+          </tr>
+          {{end}}
+          {{if not .Buys}}<tr><td colspan="5" class="muted">ордеров на покупку нет</td></tr>{{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="knote muted">Стоимость выделенного = суммарное количество × средняя цена выделенных
+      ордеров (среднее арифметическое цен). Книга кэшируется на 5 минут, как отдаёт ESI.</p>
+    {{end}}
+
+    {{else}}
+    {{if and (not .GroupID) (not .Query)}}
+    <div class="card">
+      <p class="klabel">Как пользоваться</p>
+      <p class="knote muted">Раскрывай дерево слева — товары выбранной группы появляются в нём
+        листьями, как в игре. Клик по товару открывает стакан Житы с подсветкой ордеров твоих
+        персонажей и историю цен. Строки стакана выделяются кликом — считаются объём, средняя
+        цена и стоимость выделенного.</p>
+    </div>
+    {{else if .GroupID}}
+    <div class="card">
+      <p class="klabel">{{.GroupName}}</p>
+      <p class="knote muted">Выбери товар в дереве слева — он появился под группой.</p>
+    </div>
+    {{end}}
+    {{end}}
+  </div>
+</div>
+
+{{end}}
+{{end}}

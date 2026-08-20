@@ -1,0 +1,108 @@
+{{define "content"}}
+{{template "empiretabs" "planets"}}
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{$t := .Totals}}
+<!-- shared header of both sections -->
+<div class="card phead">
+  <div class="pheadstats">
+    <div class="pstat">
+      <p class="klabel">Колонии</p>
+      <p class="kval">{{$t.Colonies}} <span class="muted" style="font-size:.8rem;">из {{$t.Allowed}}</span></p>
+      <p class="knote muted">у {{$t.Chars}} персонажей ·
+        {{if $t.Free}}<b class="lvl">{{$t.Free}}</b> свободно{{else}}все слоты заняты{{end}}</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Буры</p>
+      <p class="kval {{if lt $t.ExtRun $t.ExtAll}}neg{{else}}pos{{end}}">{{$t.ExtRun}}/{{$t.ExtAll}}</p>
+      <p class="knote muted">{{if lt $t.ExtRun $t.ExtAll}}стоят: {{sub $t.ExtAll $t.ExtRun}}{{else}}все копают{{end}}</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Заводы</p>
+      <p class="kval {{if lt $t.FacRun $t.FacAll}}neg{{else}}pos{{end}}">{{$t.FacRun}}/{{$t.FacAll}}</p>
+      <p class="knote muted">{{if lt $t.FacRun $t.FacAll}}стоят: {{sub $t.FacAll $t.FacRun}}{{else}}все работают{{end}}</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Добыча в час</p>
+      <p class="kval">{{iskraw $t.YieldHr}} <span class="muted" style="font-size:.8rem;">ед.</span></p>
+      <p class="knote muted">{{if $t.StorFull}}<b class="err">складов на пределе: {{$t.StorFull}}</b>{{else}}склады в норме{{end}}</p>
+    </div>
+  </div>
+  {{if .Yields}}
+  <div class="pheadyield">
+    <p class="klabel">Добыча в час по сырью</p>
+    <div class="frow">
+      {{range .Yields}}
+      <span class="calcchip" title="буров: {{.Rigs}}">{{item .TypeID .Name}}<b>{{iskraw .PerHour}}</b><span class="muted">ед./ч</span></span>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+</div>
+
+<div class="vwrap">
+  <nav class="vnav">
+    <a data-vpane="alerts" class="active">Требует внимания
+      <span class="cnt">{{if .Alerts}}{{if $t.AlertsErr}}<b class="sev-err">{{$t.AlertsErr}}</b>{{end}}{{if
+        and $t.AlertsErr $t.AlertsWarn}} · {{end}}{{if $t.AlertsWarn}}<b class="sev-warn">{{$t.AlertsWarn}}</b>{{end}}{{else}}<b class="pos">0</b>{{end}}</span></a>
+    <a data-vpane="chars">Планеты персонажей
+      <span class="cnt">{{$t.Colonies}}</span></a>
+  </nav>
+
+  <div class="vbody">
+    <!-- ── needs attention ── -->
+    <div data-vpane-body="alerts">
+      {{if .Alerts}}
+      <div class="card">
+        <table class="alerts">
+          {{range .Alerts}}
+          <tr>
+            <td><span class="albadge {{.Level}}"></span></td>
+            <td><a class="alink" href="/characters/{{.CharID}}/planets">{{.Char}}</a></td>
+            <td class="pl">{{.Planet}}</td>
+            <td>{{range $i, $a := .Parts}}{{if $i}}<span class="muted"> и </span>{{end}}<span
+              class="sev-{{$a.Level}}">{{$a.What}}</span>{{end}}</td>
+            <td class="muted">{{range $i, $a := .Parts}}{{if $i}} · {{end}}{{$a.Note}}{{end}}</td>
+          </tr>
+          {{end}}
+        </table>
+      </div>
+      {{else}}
+      <p class="pos">Всё в порядке: буры копают, заводы крутятся, склады не переполнены.</p>
+      {{end}}
+    </div>
+
+    <!-- ── colonies per character ── -->
+    <div data-vpane-body="chars" hidden>
+      {{range .Chars}}
+      <div class="card">
+        <div class="frow" style="justify-content:space-between; align-items:baseline;">
+          <p style="margin:0; font-size:.95rem; color:#e8eef7;">
+            <a class="alink" href="/characters/{{.ID}}/planets">{{.Name}}</a>
+            {{if .Account}}<span class="muted" style="font-size:.78rem;"> · {{.Account}}</span>{{end}}
+          </p>
+          <p class="muted" style="margin:0; font-size:.78rem;">
+            {{.Used}} из {{.Allowed}} планет · добыча <b>{{iskraw .YieldHr}}</b> ед./час</p>
+        </div>
+        <div class="pslots">
+          {{range .Slots}}
+          {{template "planettile" .}}
+          {{end}}
+        </div>
+      </div>
+      {{end}}
+
+      {{if .NoColonies}}
+      <p class="muted" style="font-size:.78rem;">Без колоний: {{tagsjoin .NoColonies}}</p>
+      {{end}}
+
+      <p class="muted" style="font-size:.7rem; margin:.6rem 0 0;">
+        кольца снаружи внутрь: <span style="color:#e06c6c;">склады</span> ·
+        <span style="color:#e0913f;">производство</span> ·
+        <span style="color:#4da3ff;">добыча</span> · пульсация — простой ·
+        наведи на планету для подробностей</p>
+    </div>
+  </div>
+</div>
+{{end}}

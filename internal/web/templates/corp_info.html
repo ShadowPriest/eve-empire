@@ -1,0 +1,17 @@
+{{define "content"}}
+<div style="display:flex; gap:1.2rem; align-items:center;">
+  <img src="https://images.evetech.net/corporations/{{.Corp.ID}}/logo?size=128"
+       alt="{{.Info.Name}}" class="portrait" style="width:96px;height:96px;">
+  <div>
+    <h1>{{.Info.Name}} {{if .Info.Ticker}}<span class="muted">[{{.Info.Ticker}}]</span>{{end}}</h1>
+    <p class="stats">
+      Участников: <b>{{num .Info.MemberCount}}</b> &nbsp;·&nbsp;
+      Налог: <b>{{printf "%.1f" .Info.TaxRatePct}}%</b>
+    </p>
+    {{if .Info.CEOName}}<p class="stats">CEO: <b>{{.Info.CEOName}}</b></p>{{end}}
+    {{if .Info.Alliance}}<p class="stats">Альянс: <b>{{.Info.Alliance}}</b></p>{{end}}
+  </div>
+</div>
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+{{end}}

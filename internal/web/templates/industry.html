@@ -1,0 +1,27 @@
+{{define "content"}}
+<h1>{{.Selected.Name}} — индустрия</h1>
+<p class="stats">Клик по джобу — детальная информация.</p>
+{{if .CorpNote}}<p class="muted" style="font-size:.78rem;">{{.CorpNote}}</p>{{end}}
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{if .Jobs}}
+<table class="maxl" style="margin-top:1rem;">
+  <tr><th>Активность</th><th>Чертёж</th><th>Продукт</th><th class="r">Прогонов</th><th>Статус</th><th>Готово</th><th>Осталось</th></tr>
+  {{range .Jobs}}
+  <tr data-job="{{jsonenc .}}"
+      {{if eq .Status "paused"}}class="outbid" title="джоб на паузе — структура офлайн"{{end}}>
+    <td>{{.Activity}}{{if .IsCorp}} <span class="badge">корп</span>{{end}}</td>
+    <td>{{item .BlueprintType .BlueprintName}}</td>
+    <td class="muted">{{item .ProductTypeID .ProductName}}</td>
+    <td class="r">{{.Runs}}</td>
+    <td>{{if eq .Status "active"}}<span class="sell">{{.Status}}</span>
+        {{else if eq .Status "paused"}}<span class="err">{{.Status}}</span>
+        {{else}}<span class="muted">{{.Status}}</span>{{end}}</td>
+    <td>{{.EndDate.Format "02.01 15:04"}}</td>
+    <td>{{until .EndDate $.Now}}</td>
+  </tr>
+  {{end}}
+</table>
+{{else}}<p class="muted" style="margin-top:1rem;">Нет джобов.</p>{{end}}
+{{end}}

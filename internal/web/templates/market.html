@@ -1,0 +1,23 @@
+{{define "content"}}
+<h1>{{.Selected.Name}} — маркет</h1>
+<p class="stats">Клик по ордеру — текущий стакан на его станции.</p>
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{if .Orders}}
+<table class="maxm" style="margin-top:1rem;">
+  <tr><th>Тип</th><th>Предмет</th><th class="r">Цена</th><th class="r">Осталось</th><th>Станция</th></tr>
+  {{range .Orders}}
+  <tr data-order data-char="{{$.Selected.ID}}" data-type="{{.TypeID}}" data-location="{{.LocationID}}"
+      data-tname="{{.TypeName}}" data-lname="{{.LocationName}}"
+      {{if .Outbid}}class="outbid" title="ордер перебит — есть предложение лучше"{{end}}>
+    <td>{{if .IsBuyOrder}}<span class="buy">BUY</span>{{else}}<span class="sell">SELL</span>{{end}}</td>
+    <td>{{item .TypeID .TypeName}}</td>
+    <td class="r">{{isk .Price}}</td>
+    <td class="r">{{num .VolumeRemain}}/{{num .VolumeTotal}}</td>
+    <td class="muted ell">{{.LocationName}}</td>
+  </tr>
+  {{end}}
+</table>
+{{else}}<p class="muted" style="margin-top:1rem;">Нет активных ордеров.</p>{{end}}
+{{end}}

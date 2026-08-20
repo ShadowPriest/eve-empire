@@ -1,0 +1,92 @@
+{{define "content"}}
+<h1>Наблюдение за рынком</h1>
+<nav class="tabs">
+  <a href="/tools/ore">Таблица руд</a>
+  <a class="active">Товары</a>
+  <a href="/tools/orders">Ордера</a>
+</nav>
+
+<div class="card phead">
+  <div class="frow" style="justify-content:space-between;">
+    <p class="klabel" style="margin:0;">Жита, The Forge · живой ордербук и дневная история
+      <span class="muted" style="font-size:.78rem;">· цены в шапке карточек — 98-й перцентиль,
+        он не пляшет от одиночного ордера</span></p>
+    <div class="frow otoggles">
+      {{range .DayOptions}}
+      <a class="tog{{if eq . $.Days}} on{{end}}" href="?d={{.}}">{{.}} дн.</a>
+      {{end}}
+    </div>
+  </div>
+</div>
+
+<div class="cardgrid">
+  {{range .Rows}}
+  <div class="card">
+    <div class="frow" style="justify-content:space-between; align-items:flex-start;">
+      <div>
+        <p class="klabel" style="margin:0;">{{item .TypeID .Name}}
+          {{if .Global}}<span class="fnd" title="PLEX торгуется не в регионе, а на глобальном рынке">глобальный рынок</span>{{end}}</p>
+        <p class="kval isk" style="margin-top:.35rem;">{{unitprice .Stats.SellP98}}
+          <span class="muted" style="font-size:.75rem;">селл</span>
+          <span class="buy" style="font-size:.9rem;">{{unitprice .Stats.BuyMax}}</span>
+          <span class="muted" style="font-size:.75rem;">бай</span></p>
+      </div>
+      <div class="r">
+        {{if .HasHist}}
+        <p class="klabel" style="margin:0; text-align:right;">за {{$.Days}} дн.</p>
+        <p class="kval {{if gt .Change 0.0}}pos{{else}}neg{{end}}" style="margin-top:.35rem; text-align:right;">{{pct .Change}}</p>
+        {{end}}
+      </div>
+    </div>
+
+    {{if .HasHist}}
+    <div class="mwrap" style="margin-top:.8rem;">
+      <div class="mgrid">
+        <span style="bottom:100%"><b>{{unitprice .Peak}}</b></span>
+        <span style="bottom:50%"><b>{{unitprice (mulf .Peak 0.5)}}</b></span>
+      </div>
+      <div class="mchart">
+        {{range .Days}}
+        <div class="mcol" title="{{.Label}} · {{unitprice .Price}} ISK">
+          <div class="mbar"><i style="background:#4da3ff; height:{{printf "%.3f" .H}}%; bottom:0;"></i></div>
+        </div>
+        {{end}}
+      </div>
+    </div>
+    <p class="knote muted" style="margin-top:.4rem;">средняя за день по истории региона;
+      последняя известная — {{unitprice .Avg}} ISK</p>
+    {{else}}
+    <p class="knote muted" style="margin-top:.8rem;">истории нет</p>
+    {{end}}
+
+    <table style="margin-top:.7rem;">
+      <tr><th></th><th class="r">Минимум/максимум</th><th class="r">98-й</th><th class="r">90-й</th><th class="r">Ордеров</th><th class="r">Объём</th></tr>
+      <tr>
+        <td class="sell">Продажа</td>
+        <td class="r">{{unitprice .Stats.SellMin}}</td>
+        <td class="r">{{unitprice .Stats.SellP98}}</td>
+        <td class="r">{{unitprice .Stats.SellP90}}</td>
+        <td class="r muted">{{.Stats.SellOrders}}</td>
+        <td class="r muted">{{num .Stats.SellVolume}}</td>
+      </tr>
+      <tr>
+        <td class="buy">Скупка</td>
+        <td class="r">{{unitprice .Stats.BuyMax}}</td>
+        <td class="r">{{unitprice .Stats.BuyP98}}</td>
+        <td class="r">{{unitprice .Stats.BuyP90}}</td>
+        <td class="r muted">{{.Stats.BuyOrders}}</td>
+        <td class="r muted">{{num .Stats.BuyVolume}}</td>
+      </tr>
+    </table>
+    <p class="knote muted">спред: купить по селлу и продать по лучшей скупке — <b>{{pct .Spread}}</b></p>
+  </div>
+  {{end}}
+</div>
+
+<p class="knote muted">Перцентили считаются по ОБЪЁМУ ордеров: 98-й отбрасывает 2 % самого
+  дешёвого объёма в продаже (и 2 % самого дорогого в скупке) и только потом берёт крайнюю
+  цену — одиночный ордер на единицу такую цену уже не сдвинет. Обратная сторона видна на
+  инжекторах: там почти весь объём скупки висит одним ордером по 1 ISK, и обрезанные
+  перцентили честно на него и садятся — поэтому в шапке карточки стоит МАКСИМАЛЬНАЯ скупка,
+  а не перцентиль. История дневных средних приходит из ESI и отстаёт на день-два.</p>
+{{end}}

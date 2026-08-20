@@ -1,0 +1,108 @@
+{{define "content"}}
+{{template "empiretabs" "structures"}}
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{$t := .Totals}}
+<div class="card phead">
+  <div class="pheadstats">
+    <div class="pstat">
+      <p class="klabel">Структуры</p>
+      <p class="kval">{{$t.Count}}</p>
+      <p class="knote muted">по всем корпорациям с доступом</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Топливо</p>
+      <p class="kval {{if $t.LowPower}}neg{{else if $t.FuelWeek}}sev-warn{{else}}pos{{end}}">
+        {{if $t.NextFuel}}{{dur ($t.NextFuel.Sub $.Now)}}{{else if $t.Count}}—{{else}}—{{end}}</p>
+      <p class="knote muted">{{if $t.LowPower}}<b class="sev-err">без топлива: {{$t.LowPower}}</b>{{else if $t.FuelWeek}}истекает за неделю: {{$t.FuelWeek}}{{else}}до ближайшего истечения{{end}}</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Под атакой</p>
+      <p class="kval {{if $t.Reinforced}}neg{{else}}pos{{end}}">{{$t.Reinforced}}</p>
+      <p class="knote muted">структур в реинфорсе</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Боевые события</p>
+      <p class="kval {{if $t.EventsErr}}neg{{else}}pos{{end}}">{{$t.EventsErr}}</p>
+      <p class="knote muted">атаки и потери за 7 дней</p>
+    </div>
+  </div>
+</div>
+
+<div class="vwrap">
+  <nav class="vnav">
+    <a data-vpane="structs" class="active">Структуры <span class="cnt">{{$t.Count}}</span></a>
+    <a data-vpane="events">События <span class="cnt">{{len .Events}}</span></a>
+  </nav>
+
+  <div class="vbody">
+    <!-- ── structures per corporation ── -->
+    <div data-vpane-body="structs">
+      {{range .Corps}}
+      <div class="card">
+        <p class="klabel">{{.Corp.Name}}</p>
+        {{if .Note}}<p class="muted" style="font-size:.8rem;">{{.Note}}</p>{{end}}
+        {{if .Structures}}
+        <table class="strtab">
+          <tr><th>Структура</th><th>Система</th><th>Состояние</th><th>Топливо</th><th>Сервисы</th><th>Окно реинфорса</th></tr>
+          {{range .Structures}}
+          <tr>
+            <td>{{item .TypeID .TypeName}}<span class="strnm">{{.Name}}</span></td>
+            <td class="muted" style="white-space:nowrap;">{{.System}}</td>
+            <td style="white-space:nowrap;">
+              <span class="{{.StateSev}}">{{.State}}</span>
+              {{if .StateEnd}}<span class="muted"> до {{.StateEnd.Format "02.01 15:04"}}</span>{{end}}
+              {{if .Unanchors}}<br><span class="sev-warn">снятие с якоря {{.Unanchors.Format "02.01 15:04"}}</span>{{end}}
+            </td>
+            <td style="white-space:nowrap;">
+              {{if .LowPower}}<b class="sev-err">нет топлива (low power)</b>
+              {{else}}<b class="{{.FuelSev}}">{{.FuelLeft}}</b>
+              <span class="muted"> · до {{.Fuel.Format "02.01.2006 15:04"}}</span>{{end}}
+            </td>
+            <td>
+              {{if .Services}}{{range $i, $svc := .Services}}{{if $i}} · {{end}}<span
+                class="{{if $svc.Online}}pos{{else}}sev-warn{{end}}"
+                title="{{if $svc.Online}}работает{{else if $svc.Cleanup}}останавливается{{else}}выключен{{end}}">{{$svc.Name}}</span>{{end}}
+              {{else}}<span class="muted">—</span>{{end}}
+            </td>
+            <td class="muted" style="white-space:nowrap;">{{if .Reinforce}}{{.Reinforce}}{{else}}—{{end}}</td>
+          </tr>
+          {{end}}
+        </table>
+        {{else if not .Note}}<p class="muted" style="font-size:.8rem;">Структур нет.</p>{{end}}
+      </div>
+      {{end}}
+      <p class="muted" style="font-size:.7rem; margin:.6rem 0 0;">
+        Список отдаёт ESI только с ролью Station Manager. «Окно реинфорса» —
+        час, вокруг которого ±2 ч структура выходит из усиления.</p>
+    </div>
+
+    <!-- ── attack / fuel notifications ── -->
+    <div data-vpane-body="events" hidden>
+      <div class="card">
+        {{if .Events}}
+        <table class="strtab">
+          <tr><th>Когда</th><th>Событие</th><th>Структура</th><th>Система</th><th>Детали</th></tr>
+          {{range .Events}}
+          <tr>
+            <td class="muted" style="white-space:nowrap;">{{.Time.Format "02.01.2006 15:04"}}</td>
+            <td style="white-space:nowrap;"><span class="{{.Sev}}">{{.Label}}</span></td>
+            <td class="ell">{{.Structure}}</td>
+            <td class="muted" style="white-space:nowrap;">{{.System}}</td>
+            <td class="muted ell" style="max-width:420px;">{{.Details}}</td>
+          </tr>
+          {{end}}
+        </table>
+        <p class="muted" style="font-size:.7rem; margin:.6rem 0 0;">
+          События — из личных уведомлений всех альтов (единственное место в ESI,
+          где видна атака на структуру); дубли между альтами склеены. Окно хранения
+          у ESI конечное — старые события выпадают сами.</p>
+        {{else}}
+        <p class="pos">Уведомлений по структурам нет — никто не атакует и топливо не кончается.</p>
+        {{end}}
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}

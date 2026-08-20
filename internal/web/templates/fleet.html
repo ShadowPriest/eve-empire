@@ -1,0 +1,278 @@
+{{define "content"}}
+<h1>Флот</h1>
+<p class="stats">Живые данные ESI: кэш флота — 5 секунд, поэтому страница ходит в сеть
+  каждый раз. <label class="flauto"><input type="checkbox" id="flauto"> обновлять каждые 6 с</label></p>
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{if not .Fleets}}
+<div class="card maxm">
+  <p class="klabel">Ни один персонаж сейчас не во флоте</p>
+  <p class="knote muted">Проверено через <code>/characters/{id}/fleet/</code>:
+    {{if .Idle}}{{tagsjoin .Idle}}{{else}}некого проверять{{end}}.</p>
+  <p class="knote muted">Флот создаётся только в клиенте — в ESI нет ни создания, ни роспуска.
+    Собери флот в игре и обнови страницу.</p>
+</div>
+{{end}}
+
+{{range $f := .Fleets}}
+<div class="flwrap" data-fleet="{{$f.FleetID}}" data-via="{{$f.ViaID}}">
+
+  <div class="card phead">
+    <div class="pheadstats">
+      <div class="pstat">
+        <p class="klabel">Участники</p>
+        <p class="kval">{{$f.Members}}</p>
+        <p class="knote muted">в доке: {{$f.Docked}} · систем: {{$f.Systems}}</p>
+      </div>
+      <div class="pstat">
+        <p class="klabel">Структура</p>
+        <p class="kval">{{len $f.Wings}} <span class="muted" style="font-size:.8rem;">эскадр</span>
+          {{$f.Squads}} <span class="muted" style="font-size:.8rem;">эскадрилий</span></p>
+        <p class="knote muted">флот {{$f.FleetID}}</p>
+      </div>
+      <div class="pstat">
+        <p class="klabel">Командир флота</p>
+        <p class="kval" style="font-size:.95rem;">{{if $f.BossName}}{{$f.BossName}}{{else}}ID {{$f.BossID}}{{end}}</p>
+        <p class="knote muted">{{if $f.BossOurs}}<b class="pos">наш персонаж</b>{{else}}<b class="sev-err">чужой</b> — запись недоступна{{end}}</p>
+      </div>
+      <div class="pstat">
+        <p class="klabel">Читаем через</p>
+        <p class="kval" style="font-size:.95rem;">{{if $f.ViaName}}{{$f.ViaName}}{{else}}—{{end}}</p>
+        <p class="knote muted">токен, которым идут все запросы</p>
+      </div>
+    </div>
+    <div class="flflags">
+      <span class="flflag{{if $f.Settings.IsFreeMove}} on{{end}}">свободное перемещение</span>
+      <span class="flflag{{if $f.Settings.IsRegistered}} on{{end}}">реклама во Fleet Finder</span>
+      <span class="flflag{{if $f.Settings.IsVoiceEnabled}} on{{end}}">EVE Voice</span>
+    </div>
+  </div>
+
+  {{if $f.Err}}<p class="err">{{$f.Err}}</p>{{end}}
+
+  <div class="vwrap">
+    <nav class="vnav">
+      <a data-vpane="comp" class="active">Состав <span class="cnt">{{$f.Members}}</span></a>
+      <a data-vpane="manage">Управление <span class="cnt">{{if $f.ViaID}}запись{{else}}нет доступа{{end}}</span></a>
+      <a data-vpane="log">Хроника <span class="cnt">{{len $f.Events}}</span></a>
+      <a data-vpane="access">Доступ по персонажам <span class="cnt">{{len $f.Probes}}</span></a>
+      <a data-vpane="raw">Сырой ответ ESI</a>
+    </nav>
+
+    <div class="vbody">
+      <!-- ── composition ── -->
+      <div data-vpane-body="comp">
+        {{if $f.Ships}}
+        <div class="card">
+          <p class="klabel">Корабли</p>
+          <div class="frow" style="margin-top:.4rem;">
+            {{range $f.Ships}}<span class="calcchip">{{item .TypeID .Name}}<b>{{.Count}}</b></span>{{end}}
+          </div>
+        </div>
+        {{end}}
+
+        <div class="card">
+          {{if $f.Loose}}
+          <div class="flwing">
+            <div class="flhead"><span class="nm">Вне эскадр</span>
+              <span class="cnt">{{len $f.Loose}}</span></div>
+            {{template "flmembers" dict "Members" $f.Loose "F" $f "Now" $.Now}}
+          </div>
+          {{end}}
+
+          {{range $w := $f.Wings}}
+          <div class="flwing">
+            <div class="flhead">
+              <span class="nm">{{$w.Name}}</span>
+              <span class="cnt">{{$w.Members}} чел. · id {{$w.ID}}</span>
+              {{if $f.ViaID}}
+              <span class="acts">
+                <button data-flop="squad-create" data-wing="{{$w.ID}}">+ эскадрилья</button>
+                <button data-flop="wing-rename" data-wing="{{$w.ID}}" data-name="{{$w.Name}}">переименовать</button>
+                <button class="danger" data-flop="wing-delete" data-wing="{{$w.ID}}">удалить</button>
+              </span>
+              {{end}}
+            </div>
+            {{if $w.Command}}{{template "flmembers" dict "Members" $w.Command "F" $f "Now" $.Now}}{{end}}
+            {{range $sq := $w.Squads}}
+            <div class="flsq">
+              <div class="flhead">
+                <span class="nm">{{$sq.Name}}</span>
+                <span class="cnt">{{len $sq.Members}} чел. · id {{$sq.ID}}</span>
+                {{if $f.ViaID}}
+                <span class="acts">
+                  <button data-flop="squad-rename" data-squad="{{$sq.ID}}" data-name="{{$sq.Name}}">переименовать</button>
+                  <button class="danger" data-flop="squad-delete" data-squad="{{$sq.ID}}">удалить</button>
+                </span>
+                {{end}}
+              </div>
+              {{if $sq.Members}}
+              {{template "flmembers" dict "Members" $sq.Members "F" $f "Now" $.Now}}
+              {{else}}<p class="flempty">пусто</p>{{end}}
+            </div>
+            {{end}}
+          </div>
+          {{end}}
+
+          {{if $f.ViaID}}
+          <button data-flop="wing-create">+ эскадра</button>
+          {{end}}
+        </div>
+      </div>
+
+      <!-- ── management ── -->
+      <div data-vpane-body="manage" hidden>
+        {{if not $f.ViaID}}
+        <p class="err">Нет персонажа с доступом к этому флоту — запись невозможна.</p>
+        {{else}}
+        <div class="card flset">
+          <p class="klabel">Сообщение дня (MOTD)</p>
+          <p class="knote muted">CCP-flavoured HTML: работают &lt;font&gt;, &lt;a href="showinfo:..."&gt;, &lt;br&gt;.</p>
+          <textarea class="flmotd" spellcheck="false">{{$f.Settings.MOTD}}</textarea>
+          <div class="frow" style="margin-top:.5rem;">
+            <label class="flchk"><input type="checkbox" class="flfree"{{if $f.Settings.IsFreeMove}} checked{{end}}>
+              свободное перемещение по флоту</label>
+            <button data-flop="settings">Сохранить</button>
+          </div>
+        </div>
+
+        <div class="card flinv">
+          <p class="klabel">Пригласить</p>
+          <p class="knote muted">Приглашение уходит в клиент — принять его игрок должен сам.
+            Персонажа с включённым CSPA-сбором ESI пригласить не даст (422).</p>
+          <div class="frow" style="margin-top:.5rem;">
+            <input type="text" class="flname" placeholder="имя персонажа" style="min-width:220px;">
+            <select class="fltarget">
+              {{range $f.Targets}}<option value="{{.Key}}">{{.Label}}</option>{{end}}
+            </select>
+            <button data-flop="invite">Пригласить</button>
+          </div>
+          {{if $.Outside}}
+          <p class="knote muted" style="margin-top:.7rem;">Наши вне флота:</p>
+          <div class="frow" style="margin-top:.3rem;">
+            {{range $.Outside}}
+            <button data-flop="invite" data-char-id="{{.ID}}">{{.Name}}</button>
+            {{end}}
+          </div>
+          {{end}}
+        </div>
+        {{end}}
+      </div>
+
+      <!-- ── recorded history ── -->
+      <div data-vpane-body="log" hidden>
+        <div class="card">
+          <p class="klabel">Активность пилотов</p>
+          <p class="knote muted">ESI не хранит историю флота вообще — она пишется у нас,
+            пока открыта эта страница (с галкой автообновления — каждые 6 с). Каждое чтение
+            состава сравнивается с предыдущим, различия ложатся в базу.</p>
+          {{if $f.Activity}}
+          <table style="margin-top:.6rem;">
+            <tr>
+              <th>Пилот</th><th>Во флоте</th><th>Корабль</th><th>Сейчас</th>
+              <th class="r">Стыковок</th><th class="r">Смен корабля</th>
+              <th class="r">Переходов</th><th class="r">В доке</th>
+            </tr>
+            {{range $f.Activity}}
+            <tr>
+              <td>{{.Name}}{{if .Left}} <span class="muted">(вышел)</span>{{end}}</td>
+              <td class="muted nowrap">{{if .Joined.IsZero}}—{{else}}{{since .Joined $.Now}}{{end}}</td>
+              <td class="muted">{{.Ship}}</td>
+              <td>{{if .Left}}<span class="muted">не во флоте</span>
+                {{else if .InDock}}<span class="buy">в доке</span>
+                {{else}}<span class="pos">в космосе</span>{{end}}</td>
+              <td class="r">{{.Trips}}</td>
+              <td class="r">{{.Swaps}}</td>
+              <td class="r">{{.Jumps}}</td>
+              <td class="r muted nowrap">{{dur .Docked}}</td>
+            </tr>
+            {{end}}
+          </table>
+          {{else}}
+          <p class="flempty">Пока ничего не записано — первое чтение состава станет отправной точкой.</p>
+          {{end}}
+        </div>
+
+        {{if $f.Events}}
+        <div class="card">
+          <p class="klabel">Лента событий</p>
+          <table class="fllog" style="margin-top:.5rem;">
+            {{range $f.Events}}
+            <tr>
+              <td class="tm muted nowrap">{{.At.Local.Format "02.01 15:04:05"}}</td>
+              <td class="nowrap">{{.Char}}</td>
+              <td class="ev ev-{{.Kind}}">{{.Text}}</td>
+            </tr>
+            {{end}}
+          </table>
+        </div>
+        {{end}}
+      </div>
+
+      <!-- ── access probe ── -->
+      <div data-vpane-body="access" hidden>
+        <div class="card">
+          <p class="klabel">Что видит каждый наш персонаж во флоте</p>
+          <p class="knote muted">Проверка: <code>GET /fleets/{{$f.FleetID}}/</code> токеном каждого.</p>
+          <table style="margin-top:.6rem;">
+            <tr><th>Персонаж</th><th>Роль (ESI)</th><th>Доступ</th><th>Ответ</th></tr>
+            {{range $f.Probes}}
+            <tr>
+              <td>{{.Name}}{{if .Boss}} <span class="badge">босс</span>{{end}}</td>
+              <td class="muted">{{.Role}}{{if .RoleRu}} · {{.RoleRu}}{{end}}</td>
+              <td>{{if .OK}}<b class="pos">есть</b>{{else}}<b class="sev-err">нет</b>{{end}}</td>
+              <td class="muted ell" title="{{.Note}}">{{.Note}}</td>
+            </tr>
+            {{end}}
+          </table>
+          <p class="knote muted" style="margin-top:.7rem;">
+            Роль во флоте на доступ не влияет: всё, кроме <code>/characters/{id}/fleet/</code>,
+            открыто только текущему командиру флота — остальным ESI отвечает 404.</p>
+        </div>
+      </div>
+
+      <!-- ── raw ── -->
+      <div data-vpane-body="raw" hidden>
+        <div class="card">
+          <p class="klabel">GET /fleets/{{$f.FleetID}}/</p>
+          <pre class="flraw">{{$f.RawSet}}</pre>
+          <p class="klabel" style="margin-top:.8rem;">GET /fleets/{{$f.FleetID}}/wings/</p>
+          <pre class="flraw">{{$f.RawWings}}</pre>
+          <p class="klabel" style="margin-top:.8rem;">GET /fleets/{{$f.FleetID}}/members/</p>
+          <pre class="flraw">{{$f.RawMem}}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
+{{end}}
+
+{{/* flmembers renders one member table; the argument is a dict with
+     Members, F (the fleet view) and Now. */}}
+{{define "flmembers"}}
+{{$f := .F}}
+<table class="flmem">
+  {{range .Members}}
+  <tr{{if .Ours}} class="ours"{{end}}>
+    <td class="pic"><img src="https://images.evetech.net/characters/{{.CharacterID}}/portrait?size=64" alt=""></td>
+    <td class="nm">{{.Name}}{{if .Boss}} <span class="badge">ФК</span>{{end}}</td>
+    <td>{{item .ShipTypeID .Ship}}</td>
+    <td class="muted">{{.System}}{{if .Docked}} <span class="muted">· {{.Station}}</span>{{end}}</td>
+    <td class="muted nowrap">{{.RoleName}}</td>
+    <td class="muted nowrap" title="во флоте с {{.JoinTime.Local.Format "02.01.2006 15:04"}}">{{since .JoinTime $.Now}}</td>
+    <td class="muted nowrap" title="берёт флотский варп">{{if .TakesFleetWarp}}варп ✓{{else}}варп —{{end}}</td>
+    <td class="act">
+      {{if $f.ViaID}}
+      <select class="flmove" data-mem="{{.CharacterID}}">
+        <option value="">переместить…</option>
+        {{range $f.Targets}}<option value="{{.Key}}">{{.Label}}</option>{{end}}
+      </select>
+      <button class="danger" data-flop="kick" data-mem="{{.CharacterID}}">кик</button>
+      {{end}}
+    </td>
+  </tr>
+  {{end}}
+</table>
+{{end}}

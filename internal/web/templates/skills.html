@@ -1,0 +1,96 @@
+{{define "content"}}
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+<div class="skwrap">
+
+  <!-- ── catalog: groups + skill list ── -->
+  <section>
+    <div class="skhead">
+      <div>
+        <h1>Навыки</h1>
+        <p class="stats">{{num .Sheet.TotalSP}} СП всего
+          &nbsp;·&nbsp; изучено навыков: <b>{{len .Sheet.Skills}}</b></p>
+      </div>
+      <input type="search" id="sksearch" placeholder="🔍 Поиск" autocomplete="off">
+    </div>
+
+    <div class="skcats" id="skcats">
+      {{range $i, $g := .Tree}}
+      <button type="button" class="skcat" data-group="g{{$i}}">
+        <span class="ico">⬡</span>
+        <span class="nm">{{.Name}}</span>
+        <span class="cnt">{{len .Skills}}</span>
+      </button>
+      {{end}}
+    </div>
+
+    <div class="sklist" id="sklist">
+      {{range $i, $g := .Tree}}
+      {{range .Skills}}
+      <div class="skrow{{if not .Known}} unknown{{end}}" data-group="g{{$i}}" data-name="{{.SkillName}}">
+        <span class="sq">{{$a := .ActiveLevel}}{{$t := .TrainedLevel}}{{$tr := and (eq .SkillID $.TrainSkill) .Known}}{{range $l := seq 5}}<i class="{{if and $tr (eq $l $.TrainLvl)}}tr{{else if le $l $a}}on{{else if le $l $t}}dim{{end}}"></i>{{end}}</span>
+        <span class="nm">{{item .SkillID .SkillName}}</span>
+        {{if .Known}}
+        <span class="sp muted">{{num .Skillpoints}} СП</span>
+        {{else}}
+        <span class="sp muted">не изучен</span>
+        {{end}}
+        {{if not .Known}}
+        <button type="button" class="skbtn inj" data-skill="{{.SkillID}}"
+                title="Книга не внедрена — добавить в план с внедрением (планировщик скоро)">+</button>
+        {{else if lt .TrainedLevel 5}}
+        <button type="button" class="skbtn" data-skill="{{.SkillID}}"
+                title="Добавить в план обучения (планировщик скоро)">+</button>
+        {{else}}
+        <span class="skbtn done" title="Изучен полностью">✓</span>
+        {{end}}
+      </div>
+      {{end}}
+      {{end}}
+    </div>
+  </section>
+
+  <!-- ── training plan ── -->
+  <aside class="skplan">
+    <h2 class="skplanhead">План освоения навыков
+      <span class="qcnt"><b>{{len .Queue}}</b><span class="muted">/150</span></span></h2>
+
+    {{if .Queue}}
+    <div class="skqueue">
+      {{range .Queue}}
+      <div class="qrow{{if .Active}} qactive{{end}}">
+        <span class="sq">{{$c := .TrainedNow}}{{$f := .FinishedLevel}}{{range $l := seq 5}}<i class="{{if le $l $c}}on{{else if le $l $f}}q{{end}}"></i>{{end}}</span>
+        <span class="nm" title="{{.SkillName}} {{roman .FinishedLevel}}">{{item .SkillID .SkillName}} <b class="lvl">{{roman .FinishedLevel}}</b></span>
+        <span class="tm">
+          {{if .Active}}<b data-countdown="{{.FinishDate.Format "2006-01-02T15:04:05Z07:00"}}">…</b>{{else if .Dur}}<b>{{.Dur}}</b>{{else}}<span class="muted">пауза</span>{{end}}
+          {{if not .FinishDate.IsZero}}<span class="dt">~ {{.FinishDate.Format "02.01.2006"}}</span>{{end}}
+        </span>
+      </div>
+      {{end}}
+    </div>
+
+    {{if .Sheet.UnallocatedSP}}
+    <div class="skunalloc">Остались нераспределённые очки навыков: <b>{{num .Sheet.UnallocatedSP}}</b></div>
+    {{end}}
+
+    <div class="sktotal">
+      <span class="klabel">Время освоения</span>
+      {{if .QueuePaused}}
+      <b class="paused">очередь на паузе</b>
+      {{else}}
+      <b>{{.TotalDur}}</b>
+      {{if not .PlanEnds.IsZero}}<span class="ends">закончится ~ {{.PlanEnds.Format "02.01.2006 15:04"}}</span>{{end}}
+      {{end}}
+    </div>
+    {{if not .QueuePaused}}
+    <div class="skbar">{{range .Queue}}<i style="width:{{printf "%.2f" .Pct}}%"></i>{{end}}</div>
+    {{end}}
+    <p class="muted skplansp">{{num .PlanSP}} СП в плане освоения навыков</p>
+
+    {{else}}
+    <div class="card" style="margin-top:.8rem;"><p class="err" style="margin:0;">Очередь обучения пуста!</p></div>
+    {{end}}
+  </aside>
+
+</div>
+{{end}}

@@ -1,0 +1,20 @@
+{{define "content"}}
+<h1>{{.Selected.Name}} — имущество</h1>
+<p class="stats">Всего предметов: <b>{{num .Total}}</b> в {{len .Locations}} локациях</p>
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{range .Locations}}
+<details class="sgroup maxm">
+  <summary><span>{{.LocationName}}</span><span class="gsp">{{num .Total}} шт</span></summary>
+  <table style="margin:.2rem 0 .8rem;">
+    <tr><th>Предмет</th><th class="r">Кол-во</th></tr>
+    {{range .Items}}
+    <tr><td>{{chip .}}</td><td class="r">{{num .Quantity}}</td></tr>
+    {{end}}
+  </table>
+</details>
+{{else}}
+{{if not .Errors}}<p class="muted" style="margin-top:1rem;">Имущества нет.</p>{{end}}
+{{end}}
+{{end}}

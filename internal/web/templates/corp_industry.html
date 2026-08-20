@@ -1,0 +1,29 @@
+{{define "content"}}
+<h1>{{.Corp.Name}} — индустрия</h1>
+{{if .Paused}}
+<p class="err" style="font-size:.95rem;">⚠ Джобов на паузе: {{.Paused}} (структура офлайн?)</p>
+{{end}}
+<p class="stats">Клик по джобу — детальная информация.</p>
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{if .Jobs}}
+<table class="maxl" style="margin-top:1rem;">
+  <tr><th>Активность</th><th>Чертёж</th><th class="r">Прогонов</th><th>Статус</th><th>Установил</th><th>Где</th><th>Готово</th></tr>
+  {{range .Jobs}}
+  <tr data-job="{{jsonenc .}}"
+      {{if eq .Status "paused"}}class="outbid" title="джоб на паузе — структура офлайн"{{end}}>
+    <td>{{.Activity}}</td>
+    <td>{{item .BlueprintType .BlueprintName}}</td>
+    <td class="r">{{.Runs}}</td>
+    <td>{{if eq .Status "active"}}<span class="sell">{{.Status}}</span>
+        {{else if eq .Status "paused"}}<span class="err">{{.Status}}</span>
+        {{else}}<span class="muted">{{.Status}}</span>{{end}}</td>
+    <td>{{.Installer}}</td>
+    <td class="muted ell">{{.Facility}}</td>
+    <td>{{.EndDate.Format "02.01 15:04"}}</td>
+  </tr>
+  {{end}}
+</table>
+{{else}}<p class="muted" style="margin-top:1rem;">Нет джобов.</p>{{end}}
+{{end}}

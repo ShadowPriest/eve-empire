@@ -1,0 +1,81 @@
+{{define "content"}}
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+<!-- ── EVE-style wallet header ── -->
+<div class="wlthead">
+  <div class="wcard click active isk-card" data-pane="isk" title="Личный счёт">
+    <span class="wico">Ƶ</span>
+    <div><p class="wlbl">ISK</p><p class="wval">{{isk .Balance}}</p></div>
+  </div>
+  <div class="wcard plex-card" title="Плекс-хранилище общее на аккаунт — ESI его не отдаёт">
+    <span class="wico">✕</span>
+    <div><p class="wlbl">Плексы</p><p class="wval muted">—</p></div>
+  </div>
+  <div class="wside">
+    <div class="wcard click" data-pane="lp" title="Наградные баллы NPC-корпораций">
+      <span class="wico">◈</span><p><b>{{len .Loyalty}}</b> корп. НБ</p>
+    </div>
+    <div class="wcard" title="EverMarks (баллы Paragon)">
+      <span class="wico">✦</span>
+      <p>{{if ge .EverMarks 0}}<b>{{num .EverMarks}}</b> EverMarks{{else}}<span class="muted">— EverMarks</span>{{end}}</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── ISK: journal + market operations ── -->
+<div class="wpane" id="pane-isk">
+  <nav class="tabs subtabs">
+    <a data-tab="journal" class="active">Транзакции</a>
+    <a data-tab="market">Операции в торговой системе</a>
+  </nav>
+
+  <div data-tabpane="journal">
+    {{if .Journal}}
+    <table>
+      <tr><th>Дата</th><th>Тип</th><th class="r">Кол-во</th><th class="r">Баланс</th><th>Описание</th></tr>
+      {{range .Journal}}
+      <tr>
+        <td class="muted" style="white-space:nowrap;">{{.Date.Format "2006.01.02 15:04"}}</td>
+        <td>{{.TypeRu}}</td>
+        <td class="r {{if lt .Amount 0.0}}neg{{else}}pos{{end}}" style="white-space:nowrap;">{{isk .Amount}}</td>
+        <td class="r muted" style="white-space:nowrap;">{{isk .Balance}}</td>
+        <td class="muted ell" style="max-width:640px;">{{.Description}}</td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}<p class="muted" style="margin-top:1rem;">Журнал пуст.</p>{{end}}
+  </div>
+
+  <div data-tabpane="market" hidden>
+    {{if .Transactions}}
+    <table>
+      <tr><th>Дата</th><th>Тип</th><th>Предмет</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th><th>Где</th></tr>
+      {{range .Transactions}}
+      <tr>
+        <td class="muted" style="white-space:nowrap;">{{.Date.Format "2006.01.02 15:04"}}</td>
+        <td>{{if .IsBuy}}<span class="buy">BUY</span>{{else}}<span class="sell">SELL</span>{{end}}</td>
+        <td>{{.TypeName}}</td>
+        <td class="r">{{num .Quantity}}</td>
+        <td class="r">{{isk .UnitPrice}}</td>
+        <td class="r {{if .IsBuy}}neg{{else}}pos{{end}}" style="white-space:nowrap;">{{if .IsBuy}}−{{else}}+{{end}}{{isk .Total}}</td>
+        <td class="muted ell">{{.LocationName}}</td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}<p class="muted" style="margin-top:1rem;">Транзакций нет.</p>{{end}}
+  </div>
+</div>
+
+<!-- ── loyalty points ── -->
+<div class="wpane" id="pane-lp" hidden>
+  <nav class="tabs subtabs"><a class="active">Обзорная панель</a></nav>
+  {{if .Loyalty}}
+  <table class="maxs">
+    <tr><th>Корпорация</th><th class="r">Наградные баллы</th></tr>
+    {{range .Loyalty}}
+    <tr><td>{{.CorpName}}</td><td class="r">{{num .Points}}</td></tr>
+    {{end}}
+  </table>
+  {{else}}<p class="muted" style="margin-top:1rem;">Наградных баллов нет.</p>{{end}}
+</div>
+{{end}}

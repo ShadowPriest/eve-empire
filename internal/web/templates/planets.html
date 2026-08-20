@@ -1,0 +1,205 @@
+{{define "content"}}
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{range .Colonies}}
+<div class="card">
+  <div class="frow" style="justify-content:space-between; align-items:flex-start;">
+    <div style="min-width:0;">
+      <p style="margin:0; font-size:1rem; color:#e8eef7;">
+        {{.PlanetName}}
+        <span class="muted" style="font-size:.8rem;">{{.PlanetType}}</span>
+      </p>
+      <p class="muted" style="font-size:.78rem; margin:.15rem 0 0;">
+        {{if .SystemName}}{{.SystemName}} · {{end}}КЦ {{.UpgradeLevel}} ур. · структур {{.NumPins}} ·
+        связей {{.Links}} · маршрутов {{.Routes}} ·
+        обновлено {{.LastUpdate.Format "02.01.2006 15:04"}}
+      </p>
+    </div>
+    {{if not .NextExpiry.IsZero}}
+    <div style="text-align:right; flex:none;">
+      <p class="klabel" style="margin:0;">Экстракторы истекают</p>
+      <p style="margin:.1rem 0 0; font-size:.95rem;"
+         class="{{if .NextExpiry.Before $.Now}}err{{else}}lvl{{end}}">
+        {{if .NextExpiry.Before $.Now}}остановлены{{else}}<b data-countdown="{{.NextExpiry.Format "2006-01-02T15:04:05Z07:00"}}">…</b>{{end}}
+      </p>
+      <p class="muted" style="font-size:.7rem; margin:.1rem 0 0;">{{.NextExpiry.Format "02.01 15:04"}}</p>
+    </div>
+    {{end}}
+  </div>
+
+  {{if .Err}}<p class="err" style="margin:.5rem 0 0;">{{.Err}}</p>{{end}}
+
+  {{if .Pins}}
+  <div class="colrow">
+  <div class="colmapcol">
+  <p class="bphead" style="margin-top:0;">Схема колонии <span class="muted">[{{len .Pins}} структур]</span></p>
+  <div class="colmap-scroll">
+  <div class="colmap">
+    <svg class="colmap-links" viewBox="0 0 760 507">
+      <defs>
+        <marker id="arrRaw" viewBox="0 0 8 8" refX="7" refY="4"
+                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,1 L7,4 L0,7 z" fill="#53c3d8"/>
+        </marker>
+        <marker id="arrProd" viewBox="0 0 8 8" refX="7" refY="4"
+                markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,1 L7,4 L0,7 z" fill="#5fd38d"/>
+        </marker>
+      </defs>
+      {{range .MapRoutes}}
+      <line class="rt rt-{{.Kind}}" data-from="{{.FromPin}}" data-to="{{.ToPin}}"
+            x1="{{printf "%.1f" (mulf .X1 7.6)}}" y1="{{printf "%.1f" (mulf .Y1 5.07)}}"
+            x2="{{printf "%.1f" (mulf .X2 7.6)}}" y2="{{printf "%.1f" (mulf .Y2 5.07)}}"
+            marker-end="url(#{{if eq .Kind "product"}}arrProd{{else}}arrRaw{{end}})">
+        <title>{{.Goods}}</title>
+      </line>
+      {{end}}
+    </svg>
+    {{range .Pins}}
+    <div class="pin pin-{{if .Role}}{{.Role}}{{else}}basic{{end}}{{if .Idle}} idle{{end}}"
+         data-pin="{{.PinID}}"
+         style="left:{{printf "%.2f" .X}}%; top:{{printf "%.2f" .Y}}%;"
+         {{if .CycleEnds.After $.Now}}data-cycle-end="{{.CycleEnds.Format "2006-01-02T15:04:05Z07:00"}}"
+         data-cycle-sec="{{.CycleSec}}"{{end}}
+         data-tip="{{.TypeName}}"
+         {{if .Product}}data-tip-out="{{.Product}}{{if .OutQty}} ×{{.OutQty}}{{end}}"{{end}}
+         {{if .Inputs}}data-tip-in="{{range $i, $x := .Inputs}}{{if $i}} · {{end}}{{$x.Name}} ×{{num $x.Amount}}{{end}}"{{end}}
+         {{if .CycleSec}}data-tip-cycle="{{.CycleSec}}"{{end}}
+         {{if .Idle}}data-tip-idle="1"{{end}}
+         {{if .Contents}}data-tip-store="{{range $i, $x := .Contents}}{{if $i}} · {{end}}{{$x.Name}} {{num $x.Amount}}{{end}}"{{end}}>
+      <svg class="pin-ring" viewBox="0 0 40 40">
+        <circle class="pin-track" cx="20" cy="20" r="16"/>
+        <circle class="pin-prog" cx="20" cy="20" r="16"
+                stroke-dasharray="100.5" stroke-dashoffset="100.5"/>
+      </svg>
+      {{if .ProductID}}
+      <img src="/icons/{{.ProductID}}" alt="" loading="lazy">
+      {{else if eq .Role "launchpad"}}<span class="pin-gl">▲</span>
+      {{else if eq .Role "cc"}}<span class="pin-gl">⌂</span>
+      {{else}}<span class="pin-gl">⬡</span>{{end}}
+    </div>
+    {{end}}
+  </div>
+  </div>
+  <p class="muted colmaplegend" style="font-size:.7rem; margin:.3rem 0 0;">
+    стрелки — маршруты товаров: <span style="color:#53c3d8;">пунктир — сырьё на фабрики</span>,
+    <span style="color:#5fd38d;">сплошные — готовая продукция</span> ·
+    белое кольцо — прогресс цикла · пульсация — простой ·
+    наведи на структуру, чтобы подсветить её потоки</p>
+  </div>
+
+  {{if .Extractors}}
+  <div class="colextr">
+  <p class="bphead" style="margin-top:0;">Экстракторы <span class="muted">[{{len .Extractors}}]</span></p>
+  {{range .Extractors}}
+  <div class="extr" data-extr="{{.PinID}}">
+    <div class="frow" style="justify-content:space-between; align-items:flex-start;">
+      <div>
+        <p style="margin:0;">{{if .ProductID}}{{item .ProductID .Product}}{{end}}</p>
+        <p class="muted" style="font-size:.74rem; margin:.2rem 0 0;">
+          головок {{.Heads}}{{if .Cycles}} · циклов {{.CycleDone}}/{{.Cycles}}{{end}}</p>
+      </div>
+      <div style="text-align:right;">
+        {{if .ProgTotal}}
+        <p class="klabel" style="margin:0;">Объём добычи</p>
+        <p style="margin:.1rem 0 0; font-size:.9rem; color:#e8eef7;">
+          всего <b>{{num .ProgTotal}}</b></p>
+        <p class="muted" style="font-size:.72rem; margin:.1rem 0 0;">
+          осталось <b class="lvl">{{num .ProgLeft}}</b></p>
+        {{end}}
+      </div>
+    </div>
+
+    <div class="extrstats">
+      <span><span class="k">цикл</span> <b>{{.CycleMin}} мин</b></span>
+      <span><span class="k">за цикл</span> <b>{{num .QtyCycle}}</b></span>
+      <span><span class="k">в час</span> <b>{{iskraw .ProgHour}}</b></span>
+      <span><span class="k">до конца цикла</span>
+        {{if .CycleEnds.After $.Now}}<b data-countdown="{{.CycleEnds.Format "2006-01-02T15:04:05Z07:00"}}">…</b>
+        {{else}}<b class="muted">—</b>{{end}}</span>
+      <span><span class="k">программа</span>
+        {{if .Expiry.Before $.Now}}<b class="err">завершена</b>
+        {{else}}<b data-countdown="{{.Expiry.Format "2006-01-02T15:04:05Z07:00"}}">…</b>{{end}}</span>
+    </div>
+
+    {{if .Bars}}
+    <div class="extrwrap">
+    <svg class="extrgraph" viewBox="0 0 100 100" preserveAspectRatio="none">
+      {{range .Grid}}
+      <line class="grid" x1="0" x2="100" y1="{{printf "%.2f" .Y}}" y2="{{printf "%.2f" .Y}}"
+            vector-effect="non-scaling-stroke"/>
+      {{end}}
+      {{range .Bars}}
+      <rect class="{{if .Past}}past{{end}}" x="{{printf "%.3f" .X}}" y="{{printf "%.2f" .Y}}"
+            width="{{printf "%.3f" .W}}" height="{{printf "%.2f" .H}}"
+            data-bar="цикл {{.Cycle}}" data-bar-qty="{{num .Qty}}"
+            {{if .At}}data-bar-at="{{.At}}"{{end}}></rect>
+      {{end}}
+      {{if .CoverCycle}}
+      <line class="cover" x1="{{printf "%.3f" .CoverX}}" x2="{{printf "%.3f" .CoverX}}"
+            y1="0" y2="100" vector-effect="non-scaling-stroke"/>
+      {{end}}
+    </svg>
+      {{range .Grid}}<span class="gridlab" style="top:{{printf "%.2f" .Y}}%">{{num .Val}}</span>{{end}}
+    </div>
+    {{if and .CycleSec (.CycleEnds.After $.Now)}}
+    <div class="extrcyc" data-cycle-end="{{.CycleEnds.Format "2006-01-02T15:04:05Z07:00"}}"
+         data-cycle-sec="{{.CycleSec}}" title="прогресс текущего цикла"><i></i></div>
+    {{end}}
+    <p class="muted" style="font-size:.68rem; margin:.1rem 0 0; display:flex; justify-content:space-between;">
+      <span>начало</span><span>пик {{num .SparkPeak}} за цикл</span><span>конец</span></p>
+    {{if .CoverCycle}}
+    <p class="muted" style="font-size:.68rem; margin:.15rem 0 0;">
+      <b style="color:#e8c04a;">▌</b> с цикла <b style="color:#e8c04a;">{{.CoverCycle}}</b>{{if .CoverAt}}
+      ({{.CoverAt}}){{end}} добычи не хватает: {{.CoverFacs}} заводов перерабатывают
+      <b>{{num .CoverDemand}}</b> за цикл бура, и накопленный запас первых циклов к этому моменту
+      исчерпан{{if gt .CoverPeers 1}} — считается общая добыча всех {{.CoverPeers}} буров
+      по этому сырью{{end}}</p>
+    {{else if .CoverDemand}}
+    <p class="muted" style="font-size:.68rem; margin:.15rem 0 0;">
+      добычи хватает на всю программу: {{.CoverFacs}} заводов перерабатывают
+      <b>{{num .CoverDemand}}</b> за цикл бура{{if gt .CoverPeers 1}} на {{.CoverPeers}} бура
+      по этому сырью{{end}}</p>
+    {{end}}
+    {{end}}
+  </div>
+  {{end}}
+  </div>
+  {{end}}
+  </div>
+  {{end}}
+
+  {{if .Storage}}
+  <p class="bphead">Хранилища <span class="muted">[{{len .Storage}}]</span></p>
+  <div class="storgrid">
+  {{range .Storage}}
+  <div class="stor">
+    <div class="frow" style="justify-content:space-between;">
+      <span style="font-size:.8rem; color:#c9d4e3;">{{.TypeName}}</span>
+      {{if .CapM3}}
+      <span class="muted" style="font-size:.74rem;">
+        {{printf "%.0f" .UsedM3}} / {{printf "%.0f" .CapM3}} м³ ·
+        <b class="{{if ge .LoadPc 90.0}}neg{{else if ge .LoadPc 70.0}}lvl{{else}}pos{{end}}">{{printf "%.0f" .LoadPc}}%</b></span>
+      {{end}}
+    </div>
+    {{if .CapM3}}
+    <div class="storbar"><i class="{{if ge .LoadPc 90.0}}full{{else if ge .LoadPc 70.0}}warn{{end}}"
+        style="width:{{printf "%.1f" .LoadPc}}%"></i></div>
+    {{end}}
+    {{if .Contents}}
+    <div class="frow" style="margin-top:.3rem;">
+      {{range .Contents}}
+      <span class="calcchip">{{item .TypeID .Name}}<b>{{num .Amount}}</b></span>
+      {{end}}
+    </div>
+    {{else}}<p class="muted" style="font-size:.72rem; margin:.2rem 0 0;">пусто</p>{{end}}
+  </div>
+  {{end}}
+  </div>
+  {{end}}
+</div>
+{{else}}
+{{if not .Errors}}<p class="muted">Колоний нет.</p>{{end}}
+{{end}}
+
+{{end}}

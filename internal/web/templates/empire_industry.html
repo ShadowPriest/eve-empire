@@ -1,0 +1,55 @@
+{{define "content"}}
+{{template "empiretabs" "industry"}}
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{/* the three line-type buttons both report the load and filter the list;
+   nothing selected = everything, a second click on the active one resets */}}
+<div class="card phead">
+  <div class="pheadstats jkinds">
+    {{range .Tiles}}
+    <div class="pstat pick lines" data-jfilter="{{.Key}}">
+      <p class="klabel"><i class="{{.Key}}">{{.Name}}</i></p>
+      <p class="kval {{if eq .Busy .Total}}pos{{else if .Busy}}lvl{{else}}muted{{end}}">{{.Busy}}/{{.Total}}
+        <span class="muted" style="font-size:.8rem;">линий занято</span></p>
+      <p class="knote muted">работ: {{.Jobs}} · свободно: {{sub .Total .Busy}}{{if
+        .Ready}} · <span class="sev-warn">готово: {{.Ready}}</span>{{end}}</p>
+    </div>
+    {{end}}
+  </div>
+  <p class="knote muted" style="margin-top:.7rem;">
+    клик по типу — только его работы, повторный клик — снова все ·
+    стоимость запуска всего: <b class="isk">{{isk .TotalCost}}</b></p>
+</div>
+
+{{if .Jobs}}
+<table class="jobs" id="empjobs">
+  <tr>
+    <th>Персонаж</th><th class="r">Линии</th><th>Чертёж</th><th>Тип работы</th>
+    <th class="r">Прогонов</th><th>Локация</th><th class="r">Осталось</th><th class="r">Стоимость</th>
+  </tr>
+  {{range .Jobs}}
+  <tr data-job="{{jsonenc .}}" data-jkind="{{.Kind}}"
+      {{if eq .Status "paused"}}class="outbid" title="джоб на паузе — структура офлайн"{{end}}>
+    <td class="who ell"><a class="alink" href="/characters/{{.CharID}}/industry">{{.Char}}</a>{{if
+      .IsCorp}} <span class="badge">корп</span>{{end}}</td>
+    <td class="r lines"><i class="{{.Kind}}">{{.Busy}}/{{.Total}}</i></td>
+    <td class="ell">{{item .BlueprintType .BlueprintName}}</td>
+    <td class="muted nowrap">{{.Activity}}</td>
+    <td class="r muted">{{.Runs}}</td>
+    <td class="loc ell muted" title="{{.Facility}}">{{if .Facility}}{{.Facility}}{{else}}—{{end}}</td>
+    <td class="r nowrap">{{if .Ready}}<span class="pos">готово</span>
+      {{else if eq .Status "paused"}}<span class="sev-warn">пауза</span>
+      {{else}}{{until .EndDate $.Now}}{{end}}</td>
+    <td class="r isk nowrap">{{isk .Cost}}</td>
+  </tr>
+  {{end}}
+</table>
+<p class="muted" id="jobsnone" hidden style="margin-top:1rem;">Работ этого типа нет.</p>
+<p class="muted" style="font-size:.7rem; margin:.9rem 0 0;">
+  клик по строке — детали работы · линию держат работы в статусах active, paused и ready ·
+  корпоративные работы занимают линии установившего их персонажа</p>
+{{else}}
+<p class="muted" style="margin-top:1.2rem;">Ни у одного персонажа нет запущенных работ.</p>
+{{end}}
+{{end}}

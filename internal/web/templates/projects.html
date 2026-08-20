@@ -1,0 +1,20 @@
+{{define "content"}}
+<h1>{{.Corp.Name}} — проекты</h1>
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{if .Projects}}
+  {{range .Projects}}
+  <div class="card maxm">
+    <p style="margin:.1rem 0 .5rem; color:#e8eef7; font-size:1rem;">{{.Title}}</p>
+    <table class="kv">
+      {{range .Fields}}
+      <tr><th>{{.K}}</th><td>{{.V}}</td></tr>
+      {{end}}
+    </table>
+  </div>
+  {{end}}
+{{else if not .Errors}}
+<p class="muted">Проектов нет.</p>
+{{end}}
+{{end}}

@@ -1,0 +1,240 @@
+{{define "content"}}
+{{template "empiretabs" "mining"}}
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+<div class="card phead">
+  <div class="pheadstats">
+    <div class="pstat pick{{if eq .Metric "isk"}} active{{end}}" data-mfilter="isk">
+      <p class="klabel">В ISK по цене дня</p>
+      <p class="kval isk">{{iskshort .GrandISK}}</p>
+      <p class="knote muted">цена Житы в день добычи</p>
+    </div>
+    <div class="pstat pick{{if eq .Metric "vol"}} active{{end}}" data-mfilter="vol">
+      <p class="klabel">Объём</p>
+      <p class="kval">{{m3 .GrandVol}} <span class="muted" style="font-size:.8rem;">м³</span></p>
+      <p class="knote muted">лёд и руда в одном масштабе</p>
+    </div>
+    <div class="pstat pick{{if eq .Metric "qty"}} active{{end}}" data-mfilter="qty">
+      <p class="klabel">Количество</p>
+      <p class="kval">{{num .GrandQty}} <span class="muted" style="font-size:.8rem;">ед.</span></p>
+      <p class="knote muted">единицы разных руд несравнимы</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Копают</p>
+      <p class="kval">{{len .Chars}}</p>
+      <p class="knote muted">с {{.FirstDay.Format "02.01.2006"}} · строк в базе: {{num .Stored}}</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Луны</p>
+      <p class="kval">{{if .MoonQty}}{{num .MoonQty}} <span class="muted" style="font-size:.8rem;">ед.</span>{{else}}—{{end}}</p>
+      <p class="knote muted">{{if .MoonQty}}{{iskshort .MoonISK}}{{else}}обсерверов нет{{end}}</p>
+    </div>
+  </div>
+</div>
+
+<div class="vwrap">
+  <nav class="vnav">
+    <a data-vpane="chars" class="active">Персонажи <span class="cnt">{{len .Chars}}</span></a>
+    <a data-vpane="moons">Луны <span class="cnt">{{len .Moons}} корп.</span></a>
+  </nav>
+
+  <div class="vbody">
+    <!-- ── personal ledgers ── -->
+    <div data-vpane-body="chars">
+      {{if not .Chars}}
+      <div class="card">
+        <p class="klabel">В леджере пусто</p>
+        <p class="knote muted">ESI отдаёт добычу за последние ~30 дней. Никто из альтов
+          за это окно ничего не выкопал — либо не копали, либо записи уже выпали.</p>
+      </div>
+      {{else}}
+
+      <div class="card">
+        {{$sel := .Day}}
+        {{range $m := .Metrics}}
+        <div data-mchart="{{$m.Key}}"{{if ne $m.Key $.Metric}} hidden{{end}}>
+          <p class="klabel">По дням: {{$m.Label}}
+            <span class="muted" style="font-size:.78rem;">· столбец — сутки, цвет — персонаж,
+              клик по столбцу — показать только этот день</span></p>
+          <div class="mwrap">
+            <div class="mgrid">
+              <span style="bottom:100%"><b>{{metricval $m $m.Peak}} {{$m.Unit}}</b></span>
+              <span style="bottom:50%"><b>{{metricval $m $m.Peak50}}</b></span>
+            </div>
+            <div class="mchart">
+              {{range $m.Days}}
+              <div class="mcol{{if not .Total}} empty{{end}}{{if .Sel}} sel{{end}}"
+                   {{if .Total}}data-day="{{.Key}}"{{end}}
+                   title="{{.Day.Format "02.01.2006"}} · {{metricval $m .Total}} {{$m.Unit}}{{range .Segs}}&#10;{{.Name}}: {{metricval $m .Value}}{{end}}">
+                <div class="mbar">
+                  {{range .Segs}}
+                  <i style="background:{{.Color}}; height:{{printf "%.3f" .H}}%; bottom:{{printf "%.3f" .Y}}%;"></i>
+                  {{end}}
+                </div>
+              </div>
+              {{end}}
+            </div>
+          </div>
+          <div class="mxaxis">
+            {{range $m.Days}}<span>{{if .Total}}{{.Label}}{{end}}</span>{{end}}
+          </div>
+        </div>
+        {{end}}
+        <div class="frow" style="margin-top:.6rem;">
+          {{range .Chars}}
+          <span class="mlegend"><i style="background:{{.Color}}"></i>{{.Name}}</span>
+          {{end}}
+        </div>
+      </div>
+
+      {{if .Day}}
+      <div class="card mday">
+        <div class="frow" style="justify-content:space-between;">
+          <p class="klabel" style="margin:0;">Списки ниже — только за <b>{{.DayLabel}}</b>:
+            <span class="isk">{{iskshort .DayISK}}</span> ·
+            {{m3 .DayVol}} м³ · {{num .DayQty}} ед.</p>
+          <a class="alink" href="/mining?m={{.Metric}}">показать все дни</a>
+        </div>
+      </div>
+      {{end}}
+
+      <div class="card">
+        <p class="klabel">Персонажи{{if .Day}} <span class="muted" style="font-size:.78rem;">· {{.DayLabel}}</span>{{end}}</p>
+        <table style="margin-top:.5rem;">
+          <tr>
+            <th>Персонаж</th><th class="r">ISK</th><th class="r">Объём, м³</th><th class="r">Единиц</th>
+            <th class="r">Дней</th><th class="r">Систем</th><th>Основная руда</th><th>Последняя добыча</th>
+          </tr>
+          {{range .Chars}}
+          <tr>
+            <td><span class="mlegend"><i style="background:{{.Color}}"></i><a class="alink" href="/characters/{{.ID}}">{{.Name}}</a></span></td>
+            <td class="r isk">{{iskshort .ISK}}</td>
+            <td class="r">{{m3 .Vol}}</td>
+            <td class="r muted">{{num .Qty}}</td>
+            <td class="r">{{.Days}}</td>
+            <td class="r">{{.Systems}}</td>
+            <td>{{item .TopOreID .TopOre}}</td>
+            <td class="muted nowrap">{{.Last.Format "02.01.2006"}}</td>
+          </tr>
+          {{end}}
+        </table>
+      </div>
+
+      <div class="cols2">
+        <div class="card">
+          <p class="klabel">Руда</p>
+          <table style="margin-top:.5rem;">
+            <tr><th>Тип</th><th class="r">ISK</th><th class="r">Цена/ед.</th>
+              <th class="r">м³</th><th class="r">Единиц</th><th class="r">Кто</th></tr>
+            {{range .Ores}}
+            <tr>
+              <td class="ell">{{item .TypeID .Name}}</td>
+              <td class="r isk">{{iskshort .ISK}}</td>
+              <td class="r muted nowrap">{{unitprice .Price}}</td>
+              <td class="r">{{m3 .Vol}}</td>
+              <td class="r muted">{{num .Qty}}</td>
+              <td class="r muted">{{.Chars}}</td>
+            </tr>
+            {{end}}
+          </table>
+        </div>
+
+        <div class="card">
+          <p class="klabel">Системы</p>
+          <table style="margin-top:.5rem;">
+            <tr><th>Система</th><th class="r">ISK</th><th class="r">м³</th>
+              <th class="r">Единиц</th><th class="r">Кто</th></tr>
+            {{range .Systems}}
+            <tr>
+              <td class="ell">{{.Name}}</td>
+              <td class="r isk">{{iskshort .ISK}}</td>
+              <td class="r">{{m3 .Vol}}</td>
+              <td class="r muted">{{num .Qty}}</td>
+              <td class="r muted">{{.Chars}}</td>
+            </tr>
+            {{end}}
+          </table>
+        </div>
+      </div>
+
+      <p class="knote muted">Цена — средняя по Жите (The Forge) за ТОТ день, когда руда
+        была добыта; она пишется в базу рядом с количеством, поэтому прошлые дни не
+        переоцениваются задним числом. Столбцы «цена/ед.» — фактическая средневзвешенная
+        по добытому. Объём берётся из sde. Окно ESI конечное (~30 дней), но всё прочитанное
+        оседает у нас: строк в базе — {{num .Stored}}.</p>
+      {{end}}
+    </div>
+
+    <!-- ── moon ledgers ── -->
+    <div data-vpane-body="moons" hidden>
+      {{if not .Moons}}
+      <div class="card">
+        <p class="klabel">Лунной добычи нет</p>
+        <p class="knote muted">Ни в одной корпорации нет структур-обсерверов
+          (Athanor/Tatara). Леджер лун ведут только они: корпоративная добыча пишется
+          не по персонажу, а по структуре.</p>
+      </div>
+      {{end}}
+
+      {{range .Moons}}
+      <div class="card">
+        <div class="frow" style="justify-content:space-between; align-items:baseline;">
+          <p class="klabel" style="margin:0;"><b>{{.Corp.Name}}</b></p>
+          {{if .Total}}<p class="muted" style="margin:0; font-size:.78rem;">
+            {{num .Total}} ед. · <span class="isk">{{iskshort .ISK}}</span></p>{{end}}
+        </div>
+        {{if .Note}}<p class="knote muted" style="margin-top:.4rem;">{{.Note}}</p>
+        {{else if not .Observers}}<p class="knote muted" style="margin-top:.4rem;">
+          обсерверов нет — корпорация не держит структур с лунным леджером</p>{{end}}
+
+        {{range .Observers}}
+        <div class="mobs">
+          <div class="frow" style="justify-content:space-between; align-items:baseline;">
+            <p style="margin:0; font-size:.85rem; color:#e8eef7;">{{.Name}}
+              <span class="muted" style="font-size:.72rem;">{{.Type}}</span></p>
+            <p class="muted" style="margin:0; font-size:.75rem;">обновлён {{.LastUpdated}} ·
+              {{num .Total}} ед. · <span class="isk">{{iskshort .ISK}}</span></p>
+          </div>
+          {{if .Rows}}
+          <table style="margin-top:.4rem;">
+            <tr><th>Пилот</th><th>Руда</th><th class="r">Добыто</th><th class="r">По рынку</th></tr>
+            {{range .Rows}}
+            <tr>
+              <td>{{.Char}}</td>
+              <td>{{item .TypeID .Ore}}</td>
+              <td class="r">{{num .Qty}}</td>
+              <td class="r isk">{{iskshort .ISK}}</td>
+            </tr>
+            {{end}}
+          </table>
+          {{else}}<p class="flempty">записей нет</p>{{end}}
+        </div>
+        {{end}}
+
+        {{if .Extractions}}
+        <p class="klabel" style="margin-top:.8rem;">Экстракции</p>
+        <table style="margin-top:.4rem;">
+          <tr><th>Структура</th><th>Луна</th><th>Начата</th><th>Прибытие куска</th><th>Естественный распад</th></tr>
+          {{range .Extractions}}
+          <tr>
+            <td>{{.Structure}}</td>
+            <td class="muted">{{.Moon}}</td>
+            <td class="muted nowrap">{{.Start.Local.Format "02.01 15:04"}}</td>
+            <td class="nowrap">{{.Arrival.Local.Format "02.01 15:04"}}
+              <span class="muted">({{until .Arrival $.Now}})</span></td>
+            <td class="muted nowrap">{{.Decay.Local.Format "02.01 15:04"}}</td>
+          </tr>
+          {{end}}
+        </table>
+        {{end}}
+      </div>
+      {{end}}
+
+      <p class="knote muted">Обсервер копит СУММУ с момента установки — дат в его записях
+        нет, только «обновлён». Динамику по лунам можно получить только собственными
+        снимками этого счётчика.</p>
+    </div>
+  </div>
+</div>
+{{end}}

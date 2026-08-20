@@ -1,0 +1,125 @@
+{{define "content"}}
+<div style="display:flex; gap:1.2rem; align-items:flex-start; width:100%;">
+  <img src="https://images.evetech.net/characters/{{.Selected.ID}}/portrait?size=256"
+       alt="{{.Selected.Name}}" class="portrait{{if .Sum.Online}} online{{end}}"
+       style="width:170px; height:170px; object-fit:cover; flex:none;"
+       title="{{if .Sum.Online}}онлайн{{else}}офлайн{{end}}">
+  <div style="min-width:0; flex:1;">
+    <h1>{{.Selected.Name}}</h1>
+    {{if .CorpName}}
+    <p class="orgrow">
+      <img src="https://images.evetech.net/corporations/{{.CorpID}}/logo?size=32" alt="">
+      <a class="alink" href="/corporations/{{.CorpID}}/info">{{.CorpName}}</a>
+      {{if .AllianceName}}
+      <span class="sep">·</span>
+      <img src="https://images.evetech.net/alliances/{{.AllianceID}}/logo?size=32" alt="">
+      <span>{{.AllianceName}}</span>
+      {{end}}
+    </p>
+    {{end}}
+    {{if .Sum.QueueSkill}}
+    <div class="qrow trainrow">
+      <span class="sq">{{$q := .Sum.QueueLevel}}{{range $l := seq 5}}<i class="{{if lt $l $q}}on{{else if eq $l $q}}q{{end}}"></i>{{end}}</span>
+      <span class="nm">{{.Sum.QueueSkill}} <b class="lvl">{{roman .Sum.QueueLevel}}</b></span>
+      <span class="tm">
+        <b data-countdown="{{.Sum.QueueEnds.Format "2006-01-02T15:04:05Z07:00"}}">…</b>
+        <span class="dt">~ {{.Sum.QueueEnds.Format "02.01.2006"}}</span>
+      </span>
+    </div>
+    {{else}}
+    <p class="err" style="margin:.45rem 0 .15rem;">очередь обучения пуста!</p>
+    {{end}}
+    <p class="stats" style="margin:.35rem 0 0;">{{num .Sum.TotalSP}} SP ·
+      <a class="alink" href="/characters/{{.Selected.ID}}/skills">план обучения →</a></p>
+    {{if .Sum.SolarSystem}}
+    <p class="stats">{{.Sum.SolarSystem}}{{if .Sum.Location}} — {{.Sum.Location}}{{else}} — в космосе{{end}}</p>
+    {{end}}
+    {{if .Sum.Ship}}
+    <p class="stats">{{.Sum.Ship}}{{if .Sum.ShipName}} «{{.Sum.ShipName}}»{{end}}</p>
+    {{end}}
+  </div>
+</div>
+
+<div class="statgrid">
+  <div class="card">
+    <p class="klabel">Кошелёк</p>
+    <p class="kval isk">{{isk .Sum.Wallet}}</p>
+    <p class="knote muted"><a href="/characters/{{.Selected.ID}}/wallet">транзакции →</a></p>
+  </div>
+  <div class="card">
+    <p class="klabel">Индустрия — линии</p>
+    <p style="margin:.35rem 0 0; font-size:.92rem; color:#e8eef7;">
+      Производство: <b {{if ge .Lines.MfgBusy .Lines.MfgTotal}}class="err"{{end}}>{{.Lines.MfgBusy}}/{{.Lines.MfgTotal}}</b><br>
+      Наука: <b {{if ge .Lines.SciBusy .Lines.SciTotal}}class="err"{{end}}>{{.Lines.SciBusy}}/{{.Lines.SciTotal}}</b><br>
+      Реакции: <b {{if ge .Lines.ReaBusy .Lines.ReaTotal}}class="err"{{end}}>{{.Lines.ReaBusy}}/{{.Lines.ReaTotal}}</b>
+    </p>
+    <p class="knote muted">
+      {{.ActiveJobs}} активных / {{.JobsCount}} джобов
+      <a href="/characters/{{.Selected.ID}}/industry">→</a>
+    </p>
+  </div>
+  <div class="card">
+    <p class="klabel">Маркет</p>
+    <p class="kval">{{.OrdersCount}} <span class="muted" style="font-size:.8rem;">ордеров</span></p>
+    <p class="knote muted"><a href="/characters/{{.Selected.ID}}/market">ордера →</a></p>
+  </div>
+  <div class="card">
+    <p class="klabel">Имущество</p>
+    <p class="kval">{{num .AssetCount}} <span class="muted" style="font-size:.8rem;">предметов</span></p>
+    <p class="knote muted"><a href="/characters/{{.Selected.ID}}/assets">по локациям →</a></p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="frow" style="justify-content:space-between; align-items:baseline;">
+    <p class="klabel" style="margin:0;">Планеты</p>
+    <p class="knote muted" style="margin:0;">
+      {{.ColonyCount}} из 6 · <a href="/characters/{{.Selected.ID}}/planets">колонии →</a>
+      · <a href="/planets">все альты →</a></p>
+  </div>
+  <div class="pslots">
+    {{range .Planets}}
+    {{template "planettile" .}}
+    {{end}}
+  </div>
+  <p class="muted" style="font-size:.7rem; margin:.5rem 0 0;">
+    кольца снаружи внутрь: <span style="color:#e06c6c;">склады</span> ·
+    <span style="color:#e0913f;">производство</span> ·
+    <span style="color:#4da3ff;">добыча</span> · пульсация — простой</p>
+</div>
+
+{{if .Attrs}}
+<h2>Характеристики</h2>
+<div class="attrgrid">
+  {{range .Attrs}}
+  <div class="card attrcard">
+    <p class="klabel">{{.Label}}</p>
+    <p class="attrval">{{.Total}}</p>
+    <p class="attrsplit muted">
+      <span title="базовое значение (ремап)">{{.Base}}</span>
+      {{if .Implant}}<span class="lvl" title="бонус имплантов">+{{.Implant}}</span>
+      {{else}}<span class="noimp" title="имплант не влияет">без импланта</span>{{end}}
+    </p>
+  </div>
+  {{end}}
+</div>
+<p class="muted" style="font-size:.75rem; margin:.5rem 0 0;">
+  Имплантов в активном клоне: <b>{{.ImplantCount}}</b> ·
+  <a class="alink" href="/characters/{{.Selected.ID}}/clones">клоны и импланты →</a>
+</p>
+{{end}}
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+<div class="card maxm">
+  <form method="post" action="/characters/{{.Selected.ID}}/account" class="frow">
+    <label class="stats" for="acct" style="margin:0;">Аккаунт:</label>
+    <input type="text" id="acct" name="account" value="{{.Selected.Account}}"
+           placeholder="например: Main" maxlength="40">
+    <button type="submit">Сохранить</button>
+    <span class="muted" style="font-size:.75rem;">группировка в списке слева</span>
+  </form>
+  <p class="muted" style="font-size:.75rem; margin:.6rem 0 0;">
+    Теги и удаление персонажа — в <a class="alink" href="/settings">настройках</a>.</p>
+</div>
+{{end}}

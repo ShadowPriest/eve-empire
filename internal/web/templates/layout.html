@@ -1,0 +1,3149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{if .Selected}}{{.Selected.Name}} — {{end}}EVE Empire</title>
+<style>
+  /* --portw / --portl are the width of a sidebar portrait and its offset
+     from the left edge. The ☰ button borrows both so it always sits
+     exactly above the portrait column, whatever the sidebar width. */
+  :root { color-scheme: dark; --sidew: 360px; --portw: 48px; --portl: 18px; }
+  * { box-sizing: border-box; }
+
+  /* ── scrollbars ──────────────────────────── */
+  /* Narrow and quiet: the track is a couple of shades off the panel it
+     sits in, the thumb picks up the usual border colour. The fixed 8px
+     also makes the sidebar predictable — a native scrollbar is 15px in
+     some browsers and would shove the portrait column off centre. */
+  * { scrollbar-width: thin; scrollbar-color: #26324a #11151f; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: #11151f; }
+  ::-webkit-scrollbar-thumb { background: #26324a; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #35507a; }
+  ::-webkit-scrollbar-corner { background: #11151f; }
+  body {
+    margin: 0; height: 100vh; height: 100dvh;
+    display: grid;
+    grid-template: "top top" 48px "side main" 1fr / var(--sidew) minmax(0, 1fr);
+    background: #0b0e14; color: #c9d4e3;
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+
+  /* ── top bar ─────────────────────────────── */
+  .topbar {
+    grid-area: top;
+    display: grid; grid-template-columns: var(--sidew) minmax(0, 1fr) auto; align-items: stretch;
+    background: #0e1420; border-bottom: 1px solid #1b2436;
+  }
+  .brand {
+    display: flex; align-items: center; padding: 0 .6rem 0 0; gap: .3rem;
+    font-weight: 300; letter-spacing: .14em; color: #e8eef7; font-size: 1rem;
+    border-right: 1px solid #1b2436; overflow: hidden; white-space: nowrap;
+  }
+  .brand .word > span { color: #4da3ff; }
+  .sidetog {
+    background: none; border: none; border-radius: 6px; cursor: pointer;
+    color: #7b8aa0; font-size: 1.05rem; line-height: 1;
+    margin-left: var(--portl); width: var(--portw); flex: none; padding: .3rem 0;
+    /* a button does not inherit the font: without this the ☰ falls back
+       to Arial, whose metrics sit it visibly above the wordmark */
+    font-family: inherit;
+  }
+  .sidetog:hover { color: #e8eef7; background: #121826; border: none; }
+  .menu { display: flex; list-style: none; margin: 0; padding: 0; }
+  .menu > li { position: relative; display: flex; align-items: center; }
+  .menu > li > span {
+    padding: 0 1rem; font-size: .85rem; color: #9fb2ca; cursor: default;
+    height: 100%; display: flex; align-items: center;
+  }
+  .menu > li > a.toplink {
+    padding: 0 1rem; font-size: .85rem; color: #9fb2ca; text-decoration: none;
+    height: 100%; display: flex; align-items: center;
+  }
+  .menu > li:hover > a.toplink { color: #e8eef7; background: #121826; }
+  .menu > li:hover > span { color: #e8eef7; background: #121826; }
+  [data-empire-char].checked td { background: rgba(224,178,95,.14); }
+  .menu > li > ul {
+    display: none; position: absolute; top: 100%; left: 0; z-index: 10;
+    list-style: none; margin: 0; padding: .3rem 0; min-width: 200px;
+    background: #121826; border: 1px solid #1f2a3d; border-radius: 0 0 8px 8px;
+  }
+  .menu > li:hover > ul { display: block; }
+  .menu > li > ul a {
+    display: block; padding: .45rem 1rem; font-size: .85rem;
+    color: #c9d4e3; text-decoration: none;
+  }
+  .menu > li > ul a.subitem { padding-left: 1.9rem; }
+  .menu > li > ul a:hover { background: #1a2438; color: #fff; }
+  .menu .subhead {
+    padding: .5rem 1rem .2rem; font-size: .72rem; letter-spacing: .08em;
+    text-transform: uppercase; color: #5f708c;
+  }
+  .menu .disabled > span { color: #3f4b5f; }
+  .menu .disabled:hover > span { background: none; color: #3f4b5f; }
+  .menu a.soon { color: #3f4b5f; cursor: default; }
+  .menu > li > ul a.soon:hover { background: none; color: #3f4b5f; }
+
+  /* ESI status indicator + gear menu */
+  .esistatus {
+    display: flex; align-items: center; padding: 0 1rem;
+  }
+  .gearbox { position: relative; display: flex; align-items: center; margin-left: .5rem; }
+  .gear {
+    background: none; border: none; color: #7b8aa0; font-size: 1.1rem;
+    cursor: pointer; padding: .15rem .35rem; line-height: 1;
+  }
+  .gear:hover { color: #e8eef7; border: none; }
+  .gearmenu {
+    display: none; position: absolute; top: calc(100% + .55rem); right: -0.5rem; z-index: 30;
+    list-style: none; margin: 0; padding: .3rem 0; min-width: 170px;
+    background: #121826; border: 1px solid #1f2a3d; border-radius: 0 0 8px 8px;
+  }
+  .gearmenu.open { display: block; }
+  .gearmenu a {
+    display: block; padding: .45rem 1rem; font-size: .85rem;
+    color: #c9d4e3; text-decoration: none; cursor: pointer;
+  }
+  .gearmenu a:hover { background: #1a2438; color: #fff; }
+  .gearmenu a.disabled { color: #3f4b5f; cursor: default; }
+  .gearmenu a.disabled:hover { background: none; color: #3f4b5f; }
+  .esistatus .dot { margin: 0; width: 11px; height: 11px; cursor: default; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+         background: #3a4557; margin-left: .5rem; }
+  .dot.on, .dot.green { background: #5fd38d; box-shadow: 0 0 6px #5fd38d; }
+  .dot.yellow { background: #e0b25f; box-shadow: 0 0 6px #e0b25f;
+                animation: blink 1s ease-in-out infinite; }
+  .dot.red { background: #e06c6c; box-shadow: 0 0 6px #e06c6c; }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  /* ── sidebar ─────────────────────────────── */
+  .sidebar {
+    grid-area: side; display: flex; flex-direction: column;
+    background: #0e1420; border-right: 1px solid #1b2436; overflow: hidden;
+  }
+  /* stable gutter: the 8px strip is reserved whether the list overflows
+     or not, so the portrait column — and the ☰ above it — never shifts */
+  .charlist { overflow-y: auto; scrollbar-gutter: stable; flex: 1; padding: .5rem 0; }
+  .acct {
+    font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+    color: #5f708c; padding: .8rem 1rem .3rem; cursor: grab; user-select: none;
+  }
+  .tagcloud {
+    padding: .6rem .9rem .3rem; display: flex; flex-wrap: wrap; gap: .3rem;
+    border-bottom: 1px solid #1b2436;
+  }
+  .tagcloud:empty { display: none; }
+  .tag {
+    font-size: .7rem; padding: .12rem .5rem; border-radius: 10px;
+    background: #121826; border: 1px solid #2a3a55; color: #7b8aa0;
+    cursor: pointer; user-select: none;
+  }
+  .tag:hover { color: #c9d4e3; }
+  .tag.active { background: #1a2d4d; border-color: #4da3ff; color: #4da3ff; }
+  .tag.dyn { border-color: #2e5b43; color: #5fd38d; }
+  .tag.dyn.active { background: #12331f; border-color: #5fd38d; color: #5fd38d; }
+  .char {
+    display: flex; align-items: center; gap: .55rem;
+    padding: .38rem .6rem .38rem 1rem; text-decoration: none; color: #c9d4e3;
+    border-left: 2px solid transparent; cursor: pointer;
+  }
+  .char:hover { background: #121826; }
+  .char.sel { background: #121a2b; border-left-color: #4da3ff; color: #fff; }
+  .char.checked { background: #16233c; border-left-color: #e0b25f; }
+  .char.dragging { opacity: .4; }
+  .char.tag-hidden { display: none; }
+  /* the portrait sits in a wrapper so the unread-mail badge can anchor
+     to its corner — visible in the collapsed sidebar too */
+  .char .pwrap { position: relative; flex: none; align-self: stretch; display: flex; }
+  .char img {
+    width: var(--portw); flex: none; align-self: stretch; height: auto;
+    object-fit: cover; border-radius: 6px; pointer-events: none;
+  }
+  .char .mailbadge {
+    position: absolute; top: -4px; right: -6px; z-index: 1;
+    min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+    background: #c94040; color: #fff; font-size: .6rem; line-height: 16px;
+    font-weight: 600; font-style: normal; text-align: center;
+    box-shadow: 0 0 0 2px #0d1117; pointer-events: none;
+  }
+  /* ── item chips (icon + name) ────────────── */
+  .itm { display: inline-flex; align-items: center; gap: .4rem; min-width: 0; max-width: 100%; }
+  .itmico {
+    width: 24px; height: 24px; flex: none; border-radius: 3px;
+    background: #0b0e14; object-fit: contain;
+  }
+  .itmnm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .itm[data-type] { cursor: pointer; }
+  .itm[data-type]:hover .itmnm { color: #4da3ff; text-decoration: underline; }
+  td .itm { max-width: 420px; }
+  .itmico.sm { width: 18px; height: 18px; }
+
+  /* ── EVE-style item info modal ───────────── */
+  .modal.iteminfo { max-width: 660px; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+  .ihead { display: flex; gap: .8rem; padding: 1rem 1.2rem .8rem; align-items: flex-start; }
+  .ihead img {
+    width: 64px; height: 64px; flex: none; border-radius: 6px;
+    background: #0b0e14; border: 1px solid #1f2a3d; object-fit: contain;
+  }
+  .ihead h3 { margin: 0; font-size: 1rem; color: #e8eef7; font-weight: 400; }
+  .ihead .igrp { margin: .2rem 0 0; font-size: .78rem; color: #7b8aa0; }
+  .ihead .iprice { margin: .25rem 0 0; font-size: .8rem; color: #9fb2ca; }
+  .itabs {
+    display: flex; flex-wrap: wrap; gap: .1rem; padding: 0 1.2rem;
+    border-bottom: 1px solid #1b2436;
+  }
+  .itabs a {
+    padding: .4rem .75rem; font-size: .8rem; color: #7b8aa0; cursor: pointer;
+    border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  .itabs a:hover { color: #c9d4e3; }
+  .itabs a.active { color: #4da3ff; border-bottom-color: #4da3ff; }
+  .ibody { padding: .9rem 1.2rem 1.2rem; overflow-y: auto; max-height: 55vh; }
+  .ibody .empty { color: #55657d; font-size: .85rem; margin: 1.5rem 0; text-align: center; }
+  .ibody p.idesc { font-size: .85rem; line-height: 1.5; color: #b9c7da; margin: 0; }
+  .iattr { display: flex; align-items: center; gap: .6rem; padding: .28rem 0;
+           border-bottom: 1px solid #141c2b; font-size: .82rem; }
+  .iattr .an { flex: 1; min-width: 0; color: #c9d4e3; }
+  .iattr .av { color: #e8eef7; white-space: nowrap; }
+  .iskill { display: flex; align-items: center; gap: .45rem; padding: .25rem 0; font-size: .82rem; }
+  .iskill .lv { margin-left: auto; }
+  .iskills ul { list-style: none; margin: 0; padding: 0 0 0 1.1rem; }
+  .iskills > ul { padding-left: 0; }
+  .imeta {
+    margin: .8rem 0 .2rem; padding: .2rem .5rem; background: #10161f;
+    font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: #7b8aa0;
+  }
+  .imeta:first-child { margin-top: 0; }
+  .iattr.self { background: rgba(77,163,255,.1); }
+
+  /* ── planetary chain tool ────────────────── */
+  .pihead { display: flex; justify-content: space-between; align-items: flex-end;
+            gap: 1rem; flex-wrap: wrap; margin-bottom: .6rem; }
+  #pisearch {
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #e8eef7; padding: .3rem .6rem; font-size: .82rem; min-width: 200px;
+  }
+  /* the chain needs real width: scroll it instead of truncating names */
+  .piscroll { overflow-x: auto; padding-bottom: .5rem; }
+  .piwrap {
+    position: relative; display: grid;
+    grid-template-columns: 110px repeat(5, minmax(165px, 1fr));
+    gap: .5rem; align-items: start; min-width: 1000px;
+  }
+  .pilines { position: absolute; inset: 0; width: 100%; height: 100%;
+             pointer-events: none; z-index: 2; overflow: visible; }
+  .picol { min-width: 0; }
+  .pitier {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: .25rem .4rem; margin-bottom: .3rem; background: #10161f;
+    border-bottom: 1px solid #24314a; font-size: .72rem;
+    letter-spacing: .08em; text-transform: uppercase; color: #9fb2ca;
+  }
+  .pinode, .piplanet {
+    display: flex; align-items: center; gap: .35rem;
+    padding: .2rem .35rem; margin-bottom: 2px; min-width: 0;
+    background: #10161f; border: 1px solid #1b2436; border-radius: 3px;
+    font-size: .74rem; cursor: pointer; position: relative; z-index: 3;
+  }
+  .pinode img, .piplanet img { width: 22px; height: 22px; flex: none; border-radius: 3px; }
+  .pinm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .piprice { color: #5fd38d; font-size: .68rem; white-space: nowrap; }
+  .pinode:hover, .piplanet:hover { border-color: #35507a; }
+  .pinode.sel { background: #16273f; border-color: #4da3ff; }
+  .pinode.up { background: #12211a; border-color: #3d7a55; }
+  .pinode.down { background: #2a2113; border-color: #6e5a2b; }
+  .pinode.dim, .piplanet.dim { opacity: .25; }
+  .piplanet.sel { background: #16273f; border-color: #4da3ff; }
+  .piplanet span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── colony map: round pins like the game's planet view ── */
+  /* The layout is computed for a 760x507 box with 46px pins and a 10px
+     gap. The box keeps that aspect ratio but shrinks to the column it is
+     given, and everything inside it is sized in cqw — 1 % of the map
+     width — so the whole picture scales instead of being cropped. */
+  .colmap-scroll { max-width: 100%; }
+  .colmap {
+    container-type: inline-size;
+    position: relative; width: 100%; max-width: 760px; aspect-ratio: 760 / 507;
+    margin: .4rem 0 0; background:
+      radial-gradient(circle at 40% 35%, #1b2230 0%, #12161d 60%, #0d1117 100%);
+    border: 1px solid #1f2a3d; border-radius: 10px; overflow: hidden;
+  }
+  .colmap-links { position: absolute; inset: 0; width: 100%; height: 100%; }
+  /* product flows: cyan into factories, green out of them */
+  .colmap-links .rt { stroke-width: 1.4; opacity: .45; transition: opacity .15s, stroke-width .15s; }
+  .colmap-links .rt-raw { stroke: #53c3d8; stroke-dasharray: 5 4; }
+  .colmap-links .rt-product { stroke: #5fd38d; }
+  .colmap-links .rt.hot { opacity: 1; stroke-width: 2.4; }
+  .colmap-links.dim .rt:not(.hot) { opacity: .12; }
+  .pin {
+    position: absolute; width: 6.05cqw; height: 6.05cqw; transform: translate(-50%, -50%);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle, #0a0d12 55%, #171c24 100%);
+    box-shadow: 0 0 0 .39cqw #3f4a5c, 0 0 0 .79cqw #e0b25f, 0 2px 6px rgba(0,0,0,.6);
+    cursor: default;
+  }
+  .pin img { width: 2.9cqw; height: 2.9cqw; position: relative; z-index: 2; }
+  .pin-gl { font-size: 2.1cqw; line-height: 1; color: #53c3d8; position: relative; z-index: 2; }
+  .pin-ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+  .pin-track { fill: none; stroke: #2b3444; stroke-width: 2.5; }
+  .pin-prog {
+    fill: none; stroke: #e8eef7; stroke-width: 2.5; stroke-linecap: round;
+    transition: stroke-dashoffset .9s linear;
+  }
+  /* structure roles by outer ring colour, as in the planet view */
+  .pin-launchpad { box-shadow: 0 0 0 .39cqw #3f4a5c, 0 0 0 .79cqw #4da3ff, 0 2px 6px rgba(0,0,0,.6); }
+  .pin-launchpad .pin-gl { color: #4da3ff; }
+  .pin-extractor { box-shadow: 0 0 0 .39cqw #3f4a5c, 0 0 0 .79cqw #53c3d8, 0 2px 6px rgba(0,0,0,.6); }
+  .pin-storage { box-shadow: 0 0 0 .39cqw #3f4a5c, 0 0 0 .79cqw #9fb2ca, 0 2px 6px rgba(0,0,0,.6); }
+  .pin-cc { box-shadow: 0 0 0 .39cqw #3f4a5c, 0 0 0 .79cqw #8f7ad8, 0 2px 6px rgba(0,0,0,.6); }
+  .pin-cc .pin-gl { color: #8f7ad8; }
+  .pin[data-tip] { cursor: help; }
+  .pintip {
+    position: fixed; z-index: 60; pointer-events: none; display: none;
+    background: #121826; border: 1px solid #2a3a55; border-radius: 8px;
+    padding: .5rem .7rem; font-size: .78rem; max-width: 330px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.6); color: #c9d4e3;
+  }
+  .pintip.on { display: block; }
+  .pintip b { color: #e8eef7; }
+  .pintip .row { margin-top: .25rem; }
+  .pintip .k { color: #7b8aa0; }
+
+  /* idle structures breathe slowly */
+  .pin.idle { animation: pinpulse 2.6s ease-in-out infinite; }
+  .pin.idle .pin-prog { stroke: #55657d; }
+  @keyframes pinpulse {
+    0%, 100% { opacity: .45; }
+    50%      { opacity: 1; }
+  }
+
+  /* planets card on the overview page: six tiles, each a planet inside
+     three rings — storage load outside, production, extraction inside */
+  .pslots {
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: .6rem; margin-top: .55rem;
+  }
+  @media (max-width: 700px) { .pslots { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .pslot { min-width: 0; }
+  .pdisc { container-type: inline-size; position: relative; width: 100%; aspect-ratio: 1; }
+  .pslot-rings {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    transform: rotate(-90deg); overflow: visible;
+  }
+  .parc-track { fill: none; stroke: #1b2436; stroke-width: 4.5; }
+  .parc {
+    fill: none; stroke-width: 4.5; stroke-linecap: round;
+    transition: stroke-dashoffset .9s linear;
+  }
+  .parc-ext { stroke: #4da3ff; }
+  .parc-fac { stroke: #e0913f; }
+  /* the storage ring is a chain of coloured slices — butt ends, or the
+     round caps of neighbouring slices would eat into each other */
+  .parc-stor { stroke-linecap: butt; transition: none; }
+  /* nothing of that kind built here — a plain white ring */
+  .parc.none { stroke: #e8eef7; opacity: .5; }
+  /* built, but standing still */
+  .parc.stall { animation: parcpulse 2.2s ease-in-out infinite; }
+  @keyframes parcpulse {
+    0%, 100% { opacity: .2; }
+    50%      { opacity: 1; }
+  }
+  .pdisc img {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 50cqw; height: 50cqw; border-radius: 50%;
+  }
+  .pslot[data-pslot] .pdisc { cursor: help; }
+  .pcap {
+    margin: .3rem 0 0; text-align: center; font-size: .72rem; color: #c9d4e3;
+  }
+  .pslot-free {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    font-size: 22cqw; line-height: 1; color: #2b3444;
+  }
+  /* locked by Interplanetary Consolidation — hatched, like the game */
+  .pslot.locked .pdisc {
+    background: repeating-linear-gradient(135deg, #0f141c 0 5px, #141b26 5px 10px);
+    border: 1px solid #1f2a3d; border-radius: 12px;
+  }
+  .pslot.locked .parc-track { stroke: transparent; }
+  .pslot-lock {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 54cqw; height: 54cqw; border-radius: 50%;
+    border: 1px solid #39445a; background: rgba(13, 17, 23, .75);
+    display: flex; align-items: center; justify-content: center; color: #6b7a92;
+  }
+  .pslot-lock svg { width: 55%; height: 55%; }
+
+  /* ── all-alts planets: shared header + vertical section menu ── */
+  .phead { margin-top: 1rem; }
+  .pheadstats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .8rem;
+  }
+  .pstat {
+    background: #0d131c; border: 1px solid #1b2436; border-radius: 8px; padding: .55rem .7rem;
+  }
+  .pheadyield { margin-top: .8rem; padding-top: .7rem; border-top: 1px solid #1b2436; }
+  .pheadyield .frow { margin-top: .4rem; }
+  .pheadyield .calcchip b { color: #e8eef7; }
+
+  .vwrap { display: flex; gap: 1.1rem; align-items: flex-start; margin-top: 1.2rem; }
+  .vnav {
+    flex: 0 0 230px; display: flex; flex-direction: column; gap: .2rem;
+    position: sticky; top: .4rem;
+  }
+  .vnav a {
+    display: flex; align-items: center; justify-content: space-between; gap: .6rem;
+    padding: .5rem .7rem; border-radius: 8px; cursor: pointer; text-decoration: none;
+    color: #9fb2ca; font-size: .85rem; border-left: 2px solid transparent;
+  }
+  .vnav a:hover { background: #121826; color: #c9d4e3; }
+  .vnav a.active { background: #121a2b; border-left-color: #4da3ff; color: #e8eef7; }
+  .vnav .cnt { font-size: .74rem; color: #7b8aa0; white-space: nowrap; }
+  .vbody { flex: 1; min-width: 0; }
+  .vbody > div > .card:first-child { margin-top: 0; }
+  @media (max-width: 900px) {
+    .vwrap { flex-direction: column; }
+    .vnav { position: static; flex: 0 0 auto; width: 100%; flex-direction: row; flex-wrap: wrap; }
+    .vnav a { flex: 1 1 auto; }
+  }
+
+  /* "needs attention" list on the all-alts planet page: one line per
+     colony — everything wrong with it is joined with "и" in one cell */
+  /* severity, matching the badges: red — already stopped, amber — will */
+  .sev-err { color: #e06c6c; }
+  .sev-warn { color: #e0b25f; }
+  .alerts { width: 100%; }
+  .alerts td { padding: .28rem .5rem .28rem 0; vertical-align: baseline; font-size: .82rem; }
+  .alerts td:first-child { width: 14px; padding-right: .1rem; }
+  .alerts .pl { color: #9fb2ca; white-space: nowrap; }
+  .albadge {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    vertical-align: middle;
+  }
+  .albadge.err { background: #e06c6c; box-shadow: 0 0 6px rgba(224,108,108,.5); }
+  .albadge.warn { background: #e0b25f; }
+
+  /* ── mail tab ─────────────────────────────────────────────── */
+  .mailtab { width: 100%; table-layout: fixed; }
+  .mailtab td { vertical-align: baseline; }
+  .mailrow { cursor: pointer; }
+  .mailrow:hover td { background: #121a2b; }
+  /* unread rows read like the in-game client: brighter and bolder */
+  .mailrow.unread td { color: #e8eef7; font-weight: 600; }
+  /* letter / notification modal */
+  .modal.mailinfo { max-width: 720px; }
+  .mailinfo .mhead h3 { margin-bottom: .25rem; }
+  .mailinfo .igrp { margin: .1rem 0; font-size: .78rem; color: #7b8aa0; }
+  .mailinfo .mailbody {
+    margin-top: .7rem; border-top: 1px solid #1f2a3d; padding-top: .7rem;
+    font-size: .85rem; line-height: 1.5; overflow-wrap: break-word;
+  }
+  .mailinfo .ntext {
+    margin: .7rem 0 0; padding: .8rem; white-space: pre-wrap;
+    font-size: .76rem; line-height: 1.45; color: #b9c7da;
+    background: #0d1320; border: 1px solid #1f2a3d; border-radius: 8px;
+    overflow-x: auto;
+  }
+
+  /* ── empire structures ────────────────────────────────────── */
+  .strtab { width: 100%; }
+  .strtab td { vertical-align: baseline; font-size: .82rem; }
+  .strtab .strnm { margin-left: .35rem; color: #e8eef7; }
+
+  /* ── mining: daily bars stacked by character ──────────────── */
+  /* the columns are flex children, so the chart keeps its height and
+     rescales horizontally with the card — no fixed column width */
+  .mwrap { position: relative; margin-top: 1.1rem; }
+  .mchart {
+    display: flex; align-items: flex-end; gap: 2px; height: 190px;
+    padding: 0 .2rem; border-bottom: 1px solid #1f2a3d;
+  }
+  /* gridlines share the chart's box, so the labels really mark the
+     value the bars are scaled against */
+  .mgrid { position: absolute; left: 0; right: 0; top: 0; height: 190px; pointer-events: none; }
+  .mgrid span { position: absolute; left: 0; right: 0; border-top: 1px dashed #1b2436; }
+  .mgrid b {
+    position: absolute; right: 0; top: -1.05em; padding-left: .3rem;
+    background: #121826; font-size: .62rem; font-weight: 400; color: #55657d;
+  }
+  .mcol { flex: 1 1 0; min-width: 0; height: 100%; position: relative; }
+  .mcol[data-day] { cursor: pointer; }
+  .mcol:hover .mbar { outline: 1px solid #35507a; }
+  /* the picked day keeps its highlight while the lists below show it */
+  .mcol.sel .mbar { outline: 1px solid #4da3ff; background: rgba(77,163,255,.10); }
+  .mday { border-color: #35507a; background: #121a2b; }
+  .mbar { position: absolute; inset: 0; }
+  .mbar i { position: absolute; left: 0; right: 0; display: block; border-radius: 1px; }
+  .mcol.empty .mbar::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+    height: 2px; background: #172033;
+  }
+  .mxaxis {
+    display: flex; gap: 2px; margin-top: .25rem;
+    font-size: .6rem; color: #55657d;
+  }
+  .mxaxis span {
+    flex: 1 1 0; min-width: 0; text-align: center; overflow: hidden;
+    white-space: nowrap; writing-mode: vertical-rl; height: 34px;
+  }
+  .mlegend { display: inline-flex; align-items: center; gap: .35rem; font-size: .78rem; }
+  .mlegend i { width: 9px; height: 9px; border-radius: 2px; display: block; }
+  .mobs {
+    background: #0d131c; border: 1px solid #1b2436; border-radius: 8px;
+    padding: .55rem .7rem; margin-top: .6rem;
+  }
+
+  /* ── fleet tool ──────────────────────────── */
+  .flauto { margin-left: .6rem; color: #7b8aa0; font-size: .8rem; cursor: pointer; }
+  .flauto input, .flchk input { vertical-align: middle; margin-right: .3rem; }
+  .flchk { font-size: .8rem; color: #9fb2ca; cursor: pointer; }
+  .flflags { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .8rem; }
+  .flflag {
+    border: 1px solid #1f2a3d; border-radius: 5px; padding: .12rem .5rem;
+    font-size: .74rem; color: #55657d;
+  }
+  .flflag.on { border-color: #35507a; color: #4da3ff; }
+  .flwing {
+    background: #0d131c; border: 1px solid #1b2436; border-radius: 8px;
+    padding: .55rem .7rem; margin-bottom: .7rem;
+  }
+  .flhead { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+  .flhead .nm { font-size: .88rem; color: #e8eef7; }
+  .flhead .cnt { font-size: .72rem; color: #5f708c; }
+  .flhead .acts { margin-left: auto; display: flex; gap: .3rem; }
+  .flhead button { padding: .12rem .5rem; font-size: .72rem; }
+  .flsq { margin: .5rem 0 0 .6rem; border-left: 2px solid #1b2436; padding-left: .7rem; }
+  .flsq .flhead .nm { font-size: .8rem; color: #b9c7da; }
+  .flmem { width: 100%; margin-top: .3rem; }
+  .flmem td {
+    padding: .18rem .4rem; font-size: .78rem; vertical-align: middle;
+    border-bottom: 1px solid #131a27;
+  }
+  .flmem td.pic { width: 30px; padding-right: 0; }
+  .flmem td.pic img {
+    width: 26px; height: 26px; border-radius: 5px; display: block;
+    border: 1px solid #24314a; background: #0b0e14;
+  }
+  .flmem td.nm { color: #e8eef7; white-space: nowrap; }
+  .flmem tr.ours td.nm { color: #4da3ff; }
+  .flmem td.act { text-align: right; white-space: nowrap; }
+  .flmem td.act button { padding: .08rem .45rem; font-size: .72rem; margin-left: .25rem; }
+  .flmem select, .flinv select {
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #9fb2ca; font-size: .74rem; padding: .12rem .3rem; max-width: 210px;
+  }
+  .flempty { font-size: .74rem; color: #55657d; margin: .3rem 0 .2rem; }
+  .flmotd {
+    width: 100%; min-height: 76px; margin-top: .5rem; resize: vertical;
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #e8eef7; padding: .45rem .55rem; font-size: .8rem; line-height: 1.4;
+    font-family: inherit;
+  }
+  /* recorded fleet history: the feed is dense, so only the event text
+     carries colour — by kind, so docking runs stand out at a glance */
+  .fllog td { padding: .16rem .5rem; font-size: .76rem; border-bottom: 1px solid #131a27; }
+  .fllog td.tm { width: 110px; }
+  .fllog .ev { color: #9fb2ca; }
+  .fllog .ev-join { color: #5fd38d; }
+  .fllog .ev-leave { color: #e06c6c; }
+  .fllog .ev-dock, .fllog .ev-undock { color: #e0b25f; }
+  .fllog .ev-ship { color: #4da3ff; }
+  .flraw {
+    background: #0b0e14; border: 1px solid #1b2436; border-radius: 8px;
+    padding: .6rem .8rem; margin: .4rem 0 0; font-size: .72rem; color: #9fb2ca;
+    overflow: auto; max-height: 360px; white-space: pre;
+  }
+
+  /* ── empire summary ──────────────────────── */
+  .card > h2 .more {
+    float: right; font-size: .72rem; font-weight: 400; color: #4da3ff;
+    text-decoration: none; letter-spacing: 0;
+  }
+  .card > h2 .more:hover { color: #8cc4ff; }
+  /* wallets: the two totals ARE the list — each unfolds its members */
+  .wtree { width: 100%; }
+  .wgrp th { cursor: pointer; user-select: none; }
+  .wgrp th:first-child { font-weight: 500; color: #c9d4e3; }
+  .wgrp:hover th:first-child { color: #e8eef7; }
+  .wgrp .tw { display: inline-block; width: .8em; color: #5f708c; transition: transform .12s; }
+  .wgrp.open .tw { transform: rotate(90deg); }
+  .wsub td { padding-left: 1.4rem; font-size: .82rem; }
+  .wsub[hidden] { display: none; }
+  .wtot th { border-top: 1px solid #1f2a3d; color: #e8eef7; }
+  /* training list: squares, skill, countdown. Fixed layout with pinned
+     columns — the countdown never wraps, so without it a long "10д 6ч
+     54м 22с" pushes the table past the card's right edge */
+  .trtab { width: 100%; table-layout: fixed; }
+  .trtab td { padding: .22rem .4rem .22rem 0; font-size: .82rem; vertical-align: middle; }
+  .trtab .who { width: 33%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .trtab .sqc { width: 62px; padding-right: .5rem; }
+  .trtab .tmc { width: 108px; padding-right: 0; }
+  /* the level is its own column: inside the name cell the ellipsis eats
+     it exactly on the long names where it matters most */
+  .trtab .lvc { width: 30px; padding-right: .3rem; }
+  .trtab td.ell { max-width: none; padding-right: .2rem; }
+  .nowrap { white-space: nowrap; }
+
+  /* ── empire wallets tab: one game header per owner ── */
+  /* the balance tiles are the switcher — no side menu: the totals are
+     already the only two groups it would list */
+  .pstat.pick { cursor: pointer; user-select: none; transition: border-color .12s; }
+  .pstat.pick:hover { border-color: #35507a; }
+  .pstat.pick.active {
+    border-color: #4da3ff; background: #121a2b;
+    box-shadow: inset 0 0 12px rgba(77,163,255,.12);
+  }
+  .wsections { margin-top: 1.2rem; }
+  .wsections > div[hidden] { display: none; }
+  .wsections > div + div:not([hidden]) { margin-top: 1.6rem; }
+  .wsechead {
+    margin: 0 0 .6rem; font-size: .9rem; font-weight: 400; color: #b9c7da;
+    display: flex; align-items: baseline; gap: .5rem;
+  }
+  .wsechead .cnt { font-size: .78rem; color: #5f708c; }
+  .wgrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(min(290px, 100%), 1fr));
+    gap: .8rem;
+  }
+  .whead {
+    display: block; text-decoration: none; background: #121826;
+    border: 1px solid #1f2a3d; border-radius: 10px; padding: .7rem .8rem;
+  }
+  .whead:hover { border-color: #35507a; }
+  .wtop { display: flex; align-items: center; gap: .6rem; margin-bottom: .55rem; }
+  .wtop img {
+    width: 38px; height: 38px; border-radius: 6px; flex: none;
+    border: 1px solid #24314a; background: #0b0e14; object-fit: contain;
+  }
+  .wtop img.online { border-color: #3d7a55; box-shadow: 0 0 6px rgba(95,211,141,.35); }
+  .wnm { margin: 0; font-size: .88rem; color: #e8eef7; }
+  .wac { margin: .1rem 0 0; font-size: .72rem; }
+  .wmini { display: flex; flex-direction: column; gap: .25rem; margin-top: .45rem; }
+  .wmini span { display: flex; align-items: center; gap: .4rem; font-size: .78rem; color: #c9d4e3; }
+  .wmini .wico { width: 20px; height: 20px; font-size: .75rem; font-style: normal; }
+  .wdivs { width: 100%; margin-top: .45rem; }
+  .wdivs td { padding: .12rem 0; font-size: .75rem; color: #9fb2ca; }
+  .wnote { margin: .4rem 0 0; font-size: .7rem; }
+
+  /* ── empire training / industry cards ────── */
+  .trhead { display: flex; align-items: center; gap: .6rem; }
+  .trhead img {
+    width: 40px; height: 40px; border-radius: 6px; flex: none;
+    border: 1px solid #24314a; background: #0b0e14;
+  }
+  .trhead img.online { border-color: #3d7a55; box-shadow: 0 0 6px rgba(95,211,141,.35); }
+  .trnm2 { margin: 0; font-size: .9rem; color: #e8eef7; }
+  .trsum { margin-left: auto; text-align: right; font-size: .8rem; color: #c9d4e3; white-space: nowrap; }
+  .trsum .dt { display: block; font-size: .68rem; }
+  /* training tab: three cards per row that SHARE the whole row — plain
+     .cardgrid caps at 1400px and leaves a dead strip on the right of a
+     wide window, while the stats header above spans it all */
+  .trgrid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.2rem; margin-top: 1.2rem; align-items: start;
+  }
+  .trgrid .card { margin: 0; }
+  @media (max-width: 1250px) { .trgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 900px) { .trgrid { grid-template-columns: minmax(0, 1fr); } }
+  .trq5 { margin-top: .6rem; overflow: visible; }
+  .trq5 .qrow { font-size: .8rem; }
+  .trcard .knote { margin-top: .5rem; }
+
+  /* industry tab: three line-type buttons over one flat job list */
+  .jkinds { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .jkinds .klabel i { font-style: normal; font-size: .82rem; letter-spacing: .03em; }
+  /* fixed columns: the filter buttons only hide rows, and under auto
+     layout the widths were recomputed from whatever survived — every
+     click made the whole table jump */
+  .jobs { width: 100%; margin-top: 1.2rem; table-layout: fixed; }
+  /* never hard-cut: anything that still does not fit gets an ellipsis */
+  .jobs th, .jobs td { overflow: hidden; text-overflow: ellipsis; }
+  .jobs th { white-space: nowrap; }
+  .jobs tr[data-job] { cursor: pointer; }
+  .jobs tr[data-job]:hover td { background: #172033; }
+  .jobs tr[hidden] { display: none; }
+  /* all eight columns in per cent, summing to 100: with px widths the
+     leftovers all went to the blueprint column, and on a narrow window
+     it collapsed to the icon */
+  .jobs th:nth-child(1), .jobs td:nth-child(1) { width: 14%; }
+  .jobs th:nth-child(2), .jobs td:nth-child(2) { width: 6%; }
+  .jobs th:nth-child(3), .jobs td:nth-child(3) { width: 24%; }
+  .jobs th:nth-child(4), .jobs td:nth-child(4) { width: 12%; }
+  .jobs th:nth-child(5), .jobs td:nth-child(5) { width: 8%; }
+  .jobs th:nth-child(6), .jobs td:nth-child(6) { width: 17%; }
+  .jobs th:nth-child(7), .jobs td:nth-child(7) { width: 8%; }
+  .jobs th:nth-child(8), .jobs td:nth-child(8) { width: 11%; }
+  .jobs td.who, .jobs td.ell, .jobs td.loc { max-width: none; }
+  .jobs td.loc { font-size: .8rem; }
+
+  /* ── ore table ──────────────────────────────────────────────────── */
+  /* every setting is a link, so the whole state of the table sits in the
+     address bar and the back button walks it */
+  .oregrid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1rem;
+  }
+  .ofield { display: flex; flex-direction: column; gap: .3rem; }
+  .ofield input[type=text], .ofield select {
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #e8eef7; padding: .35rem .5rem; font: inherit; font-size: .85rem; width: 100%;
+  }
+  .otoggles { gap: .35rem; }
+  .ofield > .tog { align-self: flex-start; }
+  .refgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
+  .refgrid select {
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #e8eef7; padding: .35rem .5rem; font: inherit; font-size: .85rem; width: 100%;
+  }
+  @media (max-width: 560px) { .refgrid { grid-template-columns: minmax(0, 1fr); } }
+  .refall {
+    display: flex; align-items: center; gap: .45rem; margin-top: .8rem;
+    font-size: .82rem; color: #9fb2ca; cursor: pointer;
+  }
+  .refall input { accent-color: #4da3ff; }
+  .tog {
+    display: inline-block; padding: .3rem .6rem; border-radius: 999px; font-size: .78rem;
+    border: 1px solid #2a3a55; color: #7b8aa0; text-decoration: none; cursor: pointer;
+    background: #0b0e14;
+  }
+  .tog:hover { border-color: #35507a; color: #c9d4e3; }
+  .tog.on { border-color: #4da3ff; color: #e8eef7; background: #121a2b; }
+  /* the table is wider than any window worth having — scroll it inside
+     its own card instead of pushing the page sideways */
+  .otabwrap { overflow-x: auto; }
+  .oretab { min-width: 900px; }
+  .oretab th { vertical-align: bottom; white-space: nowrap; }
+  .oretab th .isk { display: block; font-size: .68rem; font-weight: 400; text-transform: none; }
+  .oretab a.shd { color: inherit; text-decoration: none; }
+  .oretab a.shd:hover { color: #4da3ff; }
+  /* one ROW per grade, the family name spanning them: stacking the
+     grades inside single cells looked tidier but never lined up — the
+     name line carries an item icon and is three times as tall as a
+     number line, so the grades drifted away from their own values */
+  /* NOTHING in this table may wrap. Every cell holds a number or a short
+     label, and the moment one of them breaks over two lines the whole
+     row grows and the grades stop lining up with their own values. */
+  /* one fixed row height for the whole table. Without it a family with a
+     single grade is as tall as its 24px icon while a family with four
+     spreads that icon over four rows — and the table breathes unevenly
+     from row to row. The icon is shrunk to fit the rhythm, not the other
+     way round. */
+  .oretab tbody td { height: 28px; }
+  .oretab td .itmico { width: 18px; height: 18px; }
+  .oretab td { vertical-align: middle; white-space: nowrap; }
+  .oretab tr.otop td { border-top: 1px solid #26324a; }
+  .oretab tr:hover td { background: #172033; }
+  .oretab td.onm { color: #e8eef7; }
+  .oretab td.onm .ovol, .oretab td.onm .oerr {
+    color: #55657d; font-style: normal; font-size: .74rem;
+  }
+  /* inline, not a block: an extra line under the name made that family's
+     rows taller than everyone else's */
+  .oretab td.onm .oerr { color: #e0b25f; margin-left: .3rem; }
+  .oretab td.ogrd { color: #7b8aa0; font-size: .76rem; }
+  .oretab td.ogrd b { color: #5fd38d; font-weight: 500; }
+  .oretab td.oyld { color: #e8eef7; }
+  .oretab td.otier { text-align: left; font-size: .76rem; }
+  .oretab td.pcol b { margin-left: .35rem; font-weight: 500; font-size: .74rem; }
+  /* price, verdict, and the per-m³ line under them — never side by side,
+     or the column width starts depending on how long the numbers are */
+  .oretab td.pcol .perm3 {
+    display: block; color: #55657d; font-style: normal; font-size: .68rem;
+  }
+  .fnd {
+    display: inline-block; margin: 0 .25rem .2rem 0; padding: .1rem .4rem;
+    border: 1px solid #2a3a55; border-radius: 4px; font-size: .7rem; color: #9fb2ca;
+  }
+
+  /* ── build calculator ───────────────────────────────────────────── */
+  .bsearch { display: flex; gap: .8rem; align-items: flex-end; }
+  .bsearch input[type=text] {
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #e8eef7; padding: .4rem .6rem; font: inherit; font-size: .9rem; width: 100%;
+  }
+  .bsearch .tog { padding: .42rem .9rem; }
+  /* the hit list is a wrapping row of pills, not a table: a search that
+     returns 40 near-identical names is scanned sideways, not read */
+  .bhitrow { flex-wrap: wrap; gap: .35rem; margin-top: .5rem; }
+  .bhead { gap: .9rem; align-items: flex-start; }
+  .bpic { width: 64px; height: 64px; border-radius: 6px; background: #0b0e14; }
+  .bgrid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem; margin-top: 1rem;
+  }
+  .bgrid input[type=text], .bgrid select {
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #e8eef7; padding: .35rem .5rem; font: inherit; font-size: .85rem; width: 100%;
+  }
+  .bgrid input:disabled { color: #55657d; border-color: #1b2436; }
+  .bowned { margin-top: .9rem; display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+  .bowned .klabel { margin: 0 .3rem 0 0; }
+  .bowned .tog i { font-style: normal; font-size: .7rem; }
+
+  .btab { width: 100%; min-width: 720px; }
+  .btab td, .btab th { white-space: nowrap; }
+  .btab td.ell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+  .btab tr:hover td { background: #172033; }
+  .btab .bgrp { font-style: normal; font-size: .72rem; margin-left: .35rem; }
+  .btab tfoot td { border-top: 1px solid #26324a; color: #e8eef7; }
+  /* the share bar sits BEFORE its number, so the eye runs down one column
+     of bars and the numbers stay right-aligned next to them */
+  .bshare {
+    display: inline-block; width: 54px; height: 5px; margin-right: .45rem;
+    border-radius: 3px; background: #1b2436; overflow: hidden; vertical-align: middle;
+  }
+  .bshare i { display: block; height: 100%; background: #4da3ff; }
+  .bkv { width: 100%; margin-top: .5rem; }
+  .bkv td { padding: .22rem 0; font-size: .85rem; color: #9fb2ca; }
+  .bkv td.r { color: #c9d4e3; }
+  .bkv tr.btot td { border-top: 1px solid #26324a; padding-top: .4rem; color: #e8eef7; }
+  /* the bill is a tree: a built component keeps its own materials under
+     it, one indent deeper, and reads as a block of its own */
+  .btab tr.bmade td { background: #101a26; }
+  .btab tr.bmade:hover td { background: #16222f; }
+  .btab tr.bsub td { font-size: .82rem; }
+  .btab .btree { font-style: normal; color: #3d4c66; margin-right: .1rem; }
+  .btab .bsurp { font-style: normal; font-size: .72rem; color: #5fd38d; margin-left: .2rem; }
+  .btab td.bdec { white-space: nowrap; }
+  .btab td.bdec .tog { padding: .15rem .5rem; font-size: .72rem; }
+  .btab td.bdec b { margin-left: .35rem; font-weight: 500; font-size: .74rem; }
+
+  /* planetary monitoring */
+  /* map on the left (760px at most, shrinks with the column), extractors
+     fill everything right of it */
+  /* A fixed share rather than "whatever is left": otherwise the width of
+     the map depends on how long the notes under the charts happen to be,
+     and colonies on one page end up with different scales. */
+  .colrow { display: flex; gap: 1rem; align-items: flex-start; }
+  .colmapcol { flex: 1 1 45%; min-width: 0; max-width: 762px; }
+  .colmaplegend { max-width: 760px; }
+  .colextr {
+    flex: 1 1 55%; min-width: 0; display: flex; flex-direction: column; gap: .5rem;
+  }
+  .colextr .extr { margin: 0; width: 100%; }
+  /* stacked: the flex basis would apply to the height, so drop it */
+  @media (max-width: 1250px) {
+    .colrow { flex-direction: column; }
+    .colmapcol, .colextr { flex: 0 0 auto; width: 100%; }
+  }
+  .extr {
+    background: #10161f; border: 1px solid #1b2436; border-radius: 6px;
+    padding: .5rem .7rem; margin: .3rem 0;
+    transition: border-color .15s, box-shadow .15s, background .15s;
+  }
+  /* the card of the extractor the cursor is over on the map */
+  .extr.hot {
+    border-color: #53c3d8; background: #121b26;
+    box-shadow: 0 0 0 1px #53c3d8, 0 0 14px rgba(83,195,216,.25);
+  }
+  /* progress of the running extraction cycle */
+  .extrcyc {
+    height: 4px; margin-top: .3rem; border-radius: 2px;
+    background: #1b2436; overflow: hidden;
+  }
+  .extrcyc i {
+    display: block; height: 100%; width: 0; background: #e8eef7;
+    border-radius: 2px; transition: width .9s linear;
+  }
+  /* the wrapper is exactly as tall as the chart, so the % offsets of the
+     grid labels line up with the svg coordinates */
+  .extrwrap { position: relative; height: 92px; margin-top: .4rem; }
+  .extrgraph {
+    width: 100%; height: 92px; display: block;
+    background: #0b0e14; border: 1px solid #141c2b; border-radius: 4px;
+  }
+  .extrgraph line.grid { stroke: #223047; stroke-width: 1; stroke-dasharray: 3 4; }
+  /* where the yield stops covering the factories */
+  .extrgraph line.cover { stroke: #e8c04a; stroke-width: 1.5; }
+  .gridlab {
+    position: absolute; right: 3px; transform: translateY(-50%);
+    font-size: .6rem; color: #55657d; pointer-events: none;
+  }
+  .extrstats {
+    display: flex; flex-wrap: wrap; gap: .2rem 1.1rem; margin-top: .5rem;
+    padding-top: .4rem; border-top: 1px solid #1b2436; font-size: .76rem;
+  }
+  .extrstats .k { color: #7b8aa0; }
+  .extrstats b { color: #e8eef7; font-weight: 500; }
+  .extrgraph rect { fill: #3d7a55; transition: fill .1s; }
+  .extrgraph rect:hover { fill: #5fd38d; }
+  .extrgraph rect.past { fill: #2b3444; }
+  .extrgraph rect.past:hover { fill: #55657d; }
+  .storgrid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+    gap: .5rem;
+  }
+  .stor {
+    background: #10161f; border: 1px solid #1b2436; border-radius: 6px;
+    padding: .45rem .7rem; margin: 0;
+  }
+  .storbar {
+    height: 6px; background: #141c2b; border-radius: 3px;
+    overflow: hidden; margin-top: .3rem;
+  }
+  .storbar i { display: block; height: 100%; background: #5fd38d; }
+  .storbar i.warn { background: #e0b25f; }
+  .storbar i.full { background: #e06c6c; }
+
+  .rawjson {
+    background: #0b0e14; border: 1px solid #1f2a3d; border-radius: 6px;
+    padding: .6rem .8rem; margin: .4rem 0 0; max-height: 420px; overflow: auto;
+    font-size: .7rem; line-height: 1.35; color: #9fb2ca;
+    font-family: ui-monospace, Consolas, monospace; white-space: pre;
+  }
+
+  /* planetary calculator */
+  .calctargets { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .8rem; }
+  .calcchip {
+    display: inline-flex; align-items: center; gap: .4rem;
+    background: #121826; border: 1px solid #2a3a55; border-radius: 6px;
+    padding: .2rem .5rem; font-size: .8rem;
+  }
+  .calcchip .x { font-style: normal; cursor: pointer; color: #7b8aa0; margin-left: .2rem; }
+  .calcchip .x:hover { color: #e06c6c; }
+  .calctbl { max-width: 900px; margin-bottom: .3rem; }
+  .calcsum {
+    display: flex; flex-wrap: wrap; gap: 1.2rem; margin-top: 1rem;
+    padding: .7rem .9rem; background: #121826; border: 1px solid #1f2a3d;
+    border-radius: 8px; font-size: .85rem; max-width: 900px;
+  }
+  [data-pipane][hidden] { display: none; }
+
+  /* blueprint list */
+  .badge.bpc { border-color: #6e5a2b; color: #e0b25f; }
+  .tag.bpfilter { cursor: pointer; }
+  #bpsearch {
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #e8eef7; padding: .25rem .5rem; font-size: .8rem; min-width: 200px;
+  }
+  tr.bprow.hidden { display: none; }
+
+  /* blueprint card */
+  .bpacts { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: .7rem; }
+  .bpact {
+    background: #10161f; border: 1px solid #24314a; border-radius: 4px;
+    color: #9fb2ca; font-size: .74rem; padding: .25rem .6rem; cursor: pointer;
+  }
+  .bpact:hover { border-color: #35507a; color: #e8eef7; }
+  .bpact.on { background: #2a2113; border-color: #e0b25f; color: #e0b25f; }
+  .bprow {
+    display: flex; align-items: baseline; gap: .6rem; padding: .3rem 0 .1rem;
+    border-bottom: 1px solid #1b2436;
+  }
+  .bplbl { font-size: .9rem; color: #e8eef7; }
+  .bptime { margin-left: auto; font-size: .82rem; color: #9fb2ca; }
+  .bptime b { color: #e8eef7; font-family: ui-monospace, "Consolas", monospace; }
+  .bpctl {
+    display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+    margin: .6rem 0 .2rem; font-size: .78rem; color: #7b8aa0;
+  }
+  .bpctl input {
+    width: 64px; background: #0b0e14; border: 1px solid #2a3a55; border-radius: 4px;
+    color: #e8eef7; padding: .18rem .35rem; font-size: .78rem;
+  }
+  .bphead {
+    margin: .9rem 0 .2rem; font-size: .8rem; color: #c9d4e3;
+    border-bottom: 1px solid #1b2436; padding-bottom: .2rem;
+  }
+
+  /* character attributes */
+  .attrgrid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+    gap: .6rem; max-width: 900px; margin-top: .5rem;
+  }
+  .attrcard { margin: 0; padding: .6rem .8rem; }
+  .attrval { margin: .2rem 0 0; font-size: 1.5rem; color: #e8eef7; font-weight: 300; }
+  .attrsplit { margin: .1rem 0 0; font-size: .74rem; display: flex; gap: .4rem; align-items: baseline; }
+  .attrsplit .noimp { color: #3f4b5f; }
+  table.attrs td, table.attrs th { padding-top: .3rem; padding-bottom: .3rem; }
+
+  /* corp + alliance line in the character header */
+  .orgrow {
+    display: flex; align-items: center; gap: .45rem;
+    margin: .35rem 0 0; font-size: .85rem; color: #b9c7da; min-width: 0;
+  }
+  .orgrow img { width: 22px; height: 22px; border-radius: 4px; flex: none; }
+  .orgrow .sep { color: #3a4557; }
+  .orgrow > span, .orgrow > a {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* online frame around portraits (sidebar + overview) */
+  .char img.online, .portrait.online {
+    outline: 2px solid #5fd38d; outline-offset: -2px;
+    box-shadow: 0 0 9px rgba(95,211,141,.45);
+  }
+  .char .ci { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+  .char .nmrow { display: flex; align-items: baseline; gap: .4rem; min-width: 0; }
+  .char .nm { font-size: .84rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
+  .char .wl { font-size: .7rem; color: #5fd38d; flex: none; }
+  .char .tr { font-size: .68rem; color: #7b8aa0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .char .tr b { color: #9fb2ca; font-weight: 500; }
+  .char .tr.none { color: #b06a5f; }
+  .lines { font-size: .68rem; letter-spacing: .02em; }
+  .lines i { font-style: normal; }
+  .lines .mfg { color: #e0b25f; }
+  .lines .sci { color: #4da3ff; }
+  .lines .rea { color: #9fe06c; }
+  .lines .sep { color: #3a4557; margin: 0 .25rem; }
+  /* Adding a character lives on /settings only — the sidebar is a list
+     of alts, not a place to act. */
+  .bulkbar {
+    display: none; padding: .7rem 1rem; border-top: 1px solid #1b2436;
+    background: #101725; font-size: .8rem;
+  }
+  .bulkbar.visible { display: block; }
+  .bulkbar .cnt { color: #4da3ff; }
+  .bulkbar button { margin-top: .5rem; width: 100%; }
+
+  /* ── main area ───────────────────────────── */
+  .main { grid-area: main; overflow-y: auto; padding: 1.2rem 2rem; }
+
+  /* character tabs */
+  .tabs { display: flex; flex-wrap: wrap; gap: .2rem; margin-bottom: 1.2rem; border-bottom: 1px solid #1b2436; }
+  .tabs a {
+    padding: .5rem 1.1rem; font-size: .85rem; color: #7b8aa0;
+    text-decoration: none; border-bottom: 2px solid transparent;
+  }
+  .tabs a:hover { color: #c9d4e3; }
+  .tabs a.active { color: #4da3ff; border-bottom-color: #4da3ff; }
+
+  h1 { font-weight: 300; margin: 0; color: #e8eef7; }
+  h2 { font-weight: 400; font-size: 1rem; color: #9fb2ca; margin: 1.8rem 0 .6rem;
+       letter-spacing: .06em; text-transform: uppercase; }
+  .stats { font-size: .92rem; color: #7b8aa0; margin-top: .45rem; }
+  .stats b { color: #b9c7da; font-weight: 500; }
+  .isk { color: #5fd38d; }
+  table { border-collapse: collapse; width: 100%; font-size: .8rem; }
+  th, td { text-align: left; padding: .26rem .55rem; border-bottom: 1px solid #1b2436; }
+  th { color: #5f708c; font-weight: 500; font-size: .7rem; text-transform: uppercase; }
+  td.r, th.r { text-align: right; }
+  .buy { color: #e0b25f; } .sell { color: #5fd38d; }
+  .neg { color: #e06c6c; } .pos { color: #5fd38d; }
+  .muted { color: #55657d; }
+  .err { color: #e0b25f; font-size: .82rem; }
+  .card { background: #121826; border: 1px solid #1f2a3d; border-radius: 10px;
+          padding: 1rem 1.2rem; margin: .6rem 0; }
+  input[type=text], select#langsel {
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #e8eef7; padding: .35rem .6rem; font-size: .85rem;
+  }
+  button {
+    background: #1a2438; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #c9d4e3; padding: .35rem .9rem; font-size: .85rem; cursor: pointer;
+  }
+  button:hover { border-color: #4da3ff; color: #fff; }
+  .danger { border-color: #3a2a2a; color: #8a6060; }
+  .danger:hover { color: #e06c6c; border-color: #e06c6c; }
+
+  /* skill tree */
+  details.sgroup { border-bottom: 1px solid #1b2436; }
+  details.sgroup > summary {
+    cursor: pointer; padding: .5rem .4rem; font-size: .88rem; color: #b9c7da;
+    list-style: none; display: flex; justify-content: space-between;
+  }
+  details.sgroup > summary::before { content: "▸ "; color: #5f708c; }
+  details[open].sgroup > summary::before { content: "▾ "; }
+  details.sgroup .gsp { color: #5f708c; font-size: .78rem; }
+  .lvl { letter-spacing: .1em; color: #4da3ff; font-size: .78rem; }
+
+  /* modal */
+  .overlay {
+    display: none; position: fixed; inset: 0; z-index: 50;
+    background: rgba(4,6,10,.7); align-items: center; justify-content: center;
+  }
+  .overlay.visible { display: flex; }
+  .modal {
+    background: #121826; border: 1px solid #2a3a55; border-radius: 12px;
+    max-width: 640px; width: 92%; max-height: 80vh; overflow-y: auto;
+    padding: 1.2rem 1.4rem;
+  }
+  .modal h3 { margin: 0 0 .8rem; font-weight: 400; color: #e8eef7; }
+  .modal tr.mine td { background: rgba(77,163,255,.16); }
+  tr.outbid td { background: rgba(224,108,108,.12); }
+  .spark { width: 100%; height: 64px; margin-top: .4rem; }
+  .badge {
+    display: inline-block; background: #1a2438; border: 1px solid #35507a;
+    color: #4da3ff; font-size: .66rem; padding: .05rem .4rem;
+    border-radius: 4px; vertical-align: middle; letter-spacing: .05em;
+  }
+
+  /* ── shared layout utilities ─────────────── */
+  .maxs { max-width: 520px; }
+  .maxm { max-width: 960px; }
+  .maxl { max-width: 1120px; }
+  .cardgrid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+    gap: 1.2rem; margin-top: 1.2rem; max-width: 1400px; align-items: start;
+  }
+  .statgrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: .8rem; margin-top: 1.2rem; max-width: 960px;
+  }
+  .cols2 {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(330px, 100%), 1fr));
+    gap: 1.6rem; margin-top: 1rem; align-items: start;
+  }
+  .cols2 h2 { margin-top: 0; }
+  .cardgrid .card, .statgrid .card { margin: 0; }
+  .card > h2:first-child { margin: .2rem 0 .6rem; }
+  .klabel { margin: 0; font-size: .92rem; color: #7b8aa0; }
+  .klabel b { color: #b9c7da; font-weight: 500; }
+  .kval { margin: .3rem 0 0; font-size: 1.15rem; color: #e8eef7; }
+  .knote { margin: .3rem 0 0; font-size: .75rem; }
+  .knote a, a.alink { color: #4da3ff; text-decoration: none; }
+  .frow { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+  td.ell {
+    max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  tr[data-job], tr[data-order] { cursor: pointer; }
+  tr[data-job]:hover td, tr[data-order]:hover td { background: #151d2e; }
+
+  /* ── orders tool: market tree + region book ──────────────── */
+  .olayout { display: flex; gap: 1rem; align-items: flex-start; margin-top: 1rem; }
+  .otree { flex: 0 0 300px; min-width: 0; }
+  .ocontent { flex: 1; min-width: 0; }
+  .ocontent > .card:first-child { margin-top: 0; }
+  .otreewrap { max-height: 76vh; overflow: auto; font-size: .8rem; }
+  .otreewrap ul { list-style: none; margin: 0; padding: 0 0 0 .85rem; }
+  .otreewrap > ul { padding-left: 0; }
+  .otreewrap li > ul { display: none; }
+  .otreewrap li.open > ul { display: block; }
+  .otreewrap li { white-space: nowrap; }
+  .mgarr, .mgsp { display: inline-block; width: .9rem; color: #5f708c;
+    cursor: pointer; user-select: none; }
+  .mgarr::before { content: '▸'; }
+  li.open > .mgarr::before { content: '▾'; }
+  .mgn { color: #b8c4d6; text-decoration: none; cursor: pointer; line-height: 1.55; }
+  a.mgn:hover { color: #8cc4ff; }
+  span.mgn { color: #7d8ba1; }
+  .mgn.active { color: #ffc44d; }
+  a.mgt { color: #e8eef7; } /* the goods stand out from the folders */
+  .crumbs { margin: 0 0 .45rem; font-size: .78rem; }
+  .crumbs a { color: #5f708c; text-decoration: none; }
+  .crumbs a:hover { color: #8cc4ff; }
+  .histsvg { width: 100%; height: auto; display: block; margin-top: .6rem; }
+  .histlegend { display: flex; flex-wrap: wrap; gap: .3rem 1rem; margin: .8rem 0 0;
+    font-size: .72rem; color: #5f708c; }
+  .histlegend i { display: inline-block; vertical-align: middle; margin-right: .3rem; }
+  .hdot { width: 7px; height: 7px; border-radius: 50%; background: #ffb547; }
+  .hwhisk { width: 2px; height: 12px; background: #55627a; }
+  .hma5 { width: 16px; height: 2px; background: #4dd2ff; }
+  .hma20 { width: 16px; height: 2px; background: #ffb547; }
+  .hdonch { width: 14px; height: 10px; background: rgba(255,255,255,.08); }
+  .hvol { width: 10px; height: 10px; background: #2b6f92; }
+  @media (max-width: 1100px) {
+    .olayout { flex-direction: column; }
+    .otree { flex-basis: auto; width: 100%; }
+    .otreewrap { max-height: 40vh; }
+  }
+
+  .obookwrap { max-height: 56vh; overflow: auto; }
+  .obookwrap thead th { position: sticky; top: 0; background: #121826; z-index: 1; }
+  tr[data-osel] { cursor: pointer; }
+  tr[data-osel]:hover td { background: #151d2e; }
+  /* selection wins over both hover and the own-order blue */
+  tr[data-osel].on td, tr[data-osel].on:hover td { background: rgba(255,196,77,.18); }
+  .oselsum { color: #5f708c; font-size: .78rem; margin: .2rem 0 .5rem; }
+  .oselsum b { color: #e8eef7; font-weight: 600; }
+  table.kv th { width: 35%; min-width: 130px; }
+  .portrait { border-radius: 10px; }
+
+  /* ── skills: EVE-style window ────────────── */
+  /* the skills page owns the viewport: no global scroll, both columns
+     scroll internally */
+  .main:has(.skwrap) { overflow-y: hidden; display: flex; flex-direction: column; }
+  .skwrap {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 500px);
+    gap: 1.6rem; max-width: 1600px; flex: 1; min-height: 0;
+  }
+  .skwrap > section { display: flex; flex-direction: column; min-height: 0; }
+  .skhead { display: flex; justify-content: space-between; align-items: flex-end;
+            gap: 1rem; flex-wrap: wrap; }
+  #sksearch {
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #e8eef7; padding: .35rem .6rem; font-size: .85rem; min-width: 200px;
+  }
+  .skcats {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(min(215px, 100%), 1fr));
+    gap: 3px; margin-top: 1rem;
+  }
+  .skcat {
+    display: flex; align-items: center; gap: .5rem; text-align: left;
+    background: #10161f; border: 1px solid #1b2436; border-radius: 0;
+    padding: .4rem .6rem; font-size: .8rem; color: #c9d4e3; cursor: pointer;
+  }
+  .skcat:hover { border-color: #35507a; color: #fff; }
+  .skcat.sel { background: #16273f; border-color: #4da3ff; color: #fff; }
+  .skcat .ico { color: #5f708c; font-size: .95rem; }
+  .skcat.sel .ico { color: #4da3ff; }
+  .skcat .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .skcat .cnt { margin-left: auto; color: #5f708c; font-size: .76rem; }
+  .sklist {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(min(330px, 100%), 1fr));
+    column-gap: 2.4rem; margin-top: 1rem;
+    flex: 1; min-height: 0; overflow-y: auto; align-content: start;
+    border-top: 1px solid #1b2436;
+  }
+  .skrow .skbtn {
+    flex: none; width: 22px; height: 22px; margin-left: .4rem;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #121826; border: 1px solid #2a3a55; border-radius: 3px;
+    color: #9fb2ca; font-size: .95rem; line-height: 1; padding: 0; cursor: pointer;
+  }
+  .skrow .skbtn:hover { border-color: #4da3ff; color: #fff; }
+  .skrow .skbtn.inj { border-color: #6e2b2b; color: #e06c6c; background: #1a1216; }
+  .skrow .skbtn.inj:hover { border-color: #e06c6c; color: #ff9d9d; }
+  .skrow .skbtn.done { border-color: #1f2a3d; color: #5fd38d; cursor: default; }
+  .skrow.unknown .nm { color: #5f708c; }
+  .skrow.unknown .sp { font-size: .7rem; }
+  .skrow.unknown .sq i { background: #121826; border-color: #1e2839; }
+  .skrow {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .34rem .4rem; border-bottom: 1px solid #141c2b; font-size: .84rem;
+  }
+  .skrow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .skrow .sp { margin-left: auto; font-size: .74rem; white-space: nowrap; }
+  .sq { display: inline-flex; gap: 2px; flex: none; }
+  .sq i {
+    width: 9px; height: 9px; background: #1e2839; border: 1px solid #2a3a55;
+  }
+  .sq i.on { background: #cfd9e8; border-color: #cfd9e8; }
+  .sq i.dim { background: #5f708c; border-color: #5f708c; }
+  .sq i.q { background: #53c3d8; border-color: #53c3d8; box-shadow: 0 0 5px rgba(83,195,216,.55); }
+  /* square of the level in training: gentle white↔cyan blink */
+  .sq i.tr, .qrow.qactive .sq i.q, .trrow.qactive .sq i.q,
+  .trainrow .sq i.q, .char .trq .sq i.q { animation: sqblink 1.6s ease-in-out infinite; }
+  @keyframes sqblink {
+    0%, 100% { background: #cfd9e8; border-color: #cfd9e8; box-shadow: 0 0 5px rgba(207,217,232,.45); }
+    50%      { background: #53c3d8; border-color: #53c3d8; box-shadow: 0 0 6px rgba(83,195,216,.7); }
+  }
+  .skplan {
+    background: #0e1420; border: 1px solid #1b2436; border-radius: 10px;
+    padding: 1rem 1.1rem; display: flex; flex-direction: column; min-height: 0;
+  }
+  .skplanhead { display: flex; justify-content: space-between; align-items: baseline;
+                margin: 0 0 .6rem; }
+  .skplanhead .qcnt b { color: #e8eef7; font-size: 1rem; }
+  .skqueue { flex: 1; min-height: 0; overflow-y: auto; }
+  .qrow {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .42rem .5rem; font-size: .84rem; border-bottom: 1px solid #141c2b;
+  }
+  /* the name cell is a flex row, not inline text: the item chip is an
+     inline-flex box whose synthesised baseline drops the level numeral
+     below the skill name when they merely sit next to each other */
+  .qrow .nm { flex: 1; min-width: 0; display: flex; align-items: center; gap: .35rem; }
+  .qrow .nm .itm { min-width: 0; }
+  .qrow .lvl { letter-spacing: 0; flex: none; }
+  .qrow .tm {
+    color: #9fb2ca; white-space: nowrap; font-size: .8rem;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+  }
+  .qrow .tm b { font-weight: 500; }
+  .qrow .tm .dt { color: #5f708c; font-size: .68rem; }
+  .qrow.qactive {
+    background: repeating-linear-gradient(-60deg,
+      rgba(83,195,216,.13) 0 10px, rgba(83,195,216,.03) 10px 20px);
+    background-size: 200% 100%;
+    animation: qslide 1.6s linear infinite;
+    border-bottom-color: #2a4a5c;
+  }
+  .qrow.qactive .tm { color: #e8eef7; font-weight: 600; }
+  @keyframes qslide { to { background-position: -23px 0; } }
+  /* training row reused on the character overview (no stripes) */
+  .trainrow {
+    background: #121826; border: 1px solid #1f2a3d; border-radius: 6px;
+    padding: .4rem .7rem; margin: .5rem 0 .15rem; width: 100%;
+  }
+
+  /* settings page: char list + tag editor */
+  .btnlink {
+    display: inline-block; background: #1a2438; border: 1px solid #2a3a55;
+    border-radius: 6px; color: #c9d4e3; padding: .35rem .9rem;
+    font-size: .85rem; text-decoration: none;
+  }
+  .btnlink:hover { border-color: #4da3ff; color: #fff; }
+  .setchar { display: flex; gap: .8rem; align-items: center; }
+  .setchar form { margin-left: auto; flex: none; }
+  .tagedit { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .45rem; }
+  .tchip .x {
+    font-style: normal; margin-left: .35rem; cursor: pointer; color: #7b8aa0;
+  }
+  .tchip .x:hover { color: #e06c6c; }
+  .tag.tadd { cursor: pointer; color: #4da3ff; border-style: dashed; }
+  .tag.tadd:hover { border-color: #4da3ff; }
+  .modal .picklist { display: flex; flex-wrap: wrap; gap: .35rem; margin: .6rem 0; }
+  .modal .mrow { display: flex; gap: .6rem; margin-top: .8rem; align-items: center; }
+  .modal .mrow input { flex: 1; }
+  /* compact training row in the sidebar char cards */
+  .char .tr.trq { display: flex; align-items: center; gap: .3rem; }
+  .char .trq .sq { gap: 1px; }
+  .char .trq .sq i { width: 6px; height: 6px; }
+  .char .trq .trnm {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; flex: 1 1 auto;
+  }
+  .char .trq .lvl { font-size: .6rem; flex: none; }
+  .char .trq b[data-countdown] { flex: none; margin-left: auto; }
+  .skunalloc {
+    margin-top: .8rem; padding: .5rem .7rem; background: #121826;
+    border: 1px solid #1f2a3d; border-radius: 6px; font-size: .8rem; color: #9fb2ca;
+  }
+  .skunalloc b { color: #4da3ff; }
+  .sktotal { margin-top: .9rem; }
+  .sktotal b { display: block; font-size: 1.3rem; color: #e8eef7; font-weight: 600; }
+  .sktotal b.paused { color: #e0b25f; font-size: 1rem; }
+  .sktotal .ends { display: block; color: #7b8aa0; font-size: .78rem; margin-top: .15rem; }
+  .skbar { display: flex; height: 10px; margin-top: .5rem; background: #141c2b; }
+  .skbar i { min-width: 2px; }
+  .skbar i:nth-child(odd) { background: #8fa2bb; }
+  .skbar i:nth-child(even) { background: #4a5a72; }
+  .skplansp { font-size: .74rem; margin: .4rem 0 0; }
+  @media (max-width: 1000px) {
+    .main:has(.skwrap) { overflow-y: auto; display: block; }
+    .skwrap { grid-template-columns: minmax(0, 1fr); }
+    .sklist { overflow-y: visible; flex: none; }
+    .skqueue { flex: none; max-height: 48vh; }
+  }
+
+  /* ── wallet: EVE-style header ────────────── */
+  .wlthead {
+    display: grid; grid-template-columns: 1.4fr 1.4fr 1fr;
+    gap: .6rem; margin-top: .6rem;
+  }
+  .wcard {
+    display: flex; align-items: center; gap: .7rem; padding: .5rem .8rem;
+    background: #10161f; border: 1px solid #24314a; border-radius: 4px;
+    user-select: none; min-width: 0;
+  }
+  .wcard.click { cursor: pointer; }
+  .wcard.click:hover { border-color: #4da3ff; }
+  .wcard.click.active { border-color: #4da3ff; background: #14213a;
+    box-shadow: inset 0 0 12px rgba(77,163,255,.12); }
+  .wcard.active.isk-card { border-color: #3d7a55; background: #12211a;
+    box-shadow: inset 0 0 12px rgba(95,211,141,.12); }
+  .wico {
+    width: 38px; height: 38px; flex: none; display: flex; align-items: center;
+    justify-content: center; background: #0b0e14; border: 1px solid #2a3a55;
+    border-radius: 4px; font-size: 1.25rem; color: #9fb2ca;
+  }
+  .isk-card .wico { color: #5fd38d; }
+  .plex-card .wico { color: #e0b25f; }
+  .wlbl { margin: 0; font-size: .7rem; text-transform: uppercase;
+          letter-spacing: .07em; color: #9fb2ca; }
+  .wval { margin: .1rem 0 0; font-size: .9rem; color: #e8eef7; white-space: nowrap;
+          overflow: hidden; text-overflow: ellipsis; }
+  .wside { display: flex; flex-direction: column; gap: .4rem; min-width: 0; }
+  .wside .wcard { flex: 1; padding: .25rem .6rem; }
+  .wside .wico { width: 24px; height: 24px; font-size: .85rem; }
+  .wside p { margin: 0; font-size: .82rem; color: #c9d4e3; white-space: nowrap;
+             overflow: hidden; text-overflow: ellipsis; }
+  .wpane[hidden] { display: none; }
+  /* corp wallets: selected-division card + division picker */
+  .wlthead.corpw { grid-template-columns: minmax(280px, 1.4fr) 1fr; }
+  .corpsel .wlbl { display: flex; align-items: center; gap: .4rem; }
+  #divsel {
+    appearance: none; -webkit-appearance: none;
+    display: block; width: 100%;
+    background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239fb2ca' fill='none' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right center / 10px 6px;
+    border: none; border-radius: 4px;
+    color: #9fb2ca; font: inherit; font-size: .78rem; letter-spacing: .07em;
+    text-transform: uppercase; padding: 0 16px 0 0; cursor: pointer;
+  }
+  #divsel:hover { color: #e8eef7; }
+  #divsel option { background: #121826; color: #c9d4e3; text-transform: none; }
+  tr.mine td { background: rgba(77,163,255,.16); }
+  .subtabs { margin-top: 1.1rem; }
+  .subtabs a { cursor: pointer; }
+  [data-tabpane][hidden] { display: none; }
+  @media (max-width: 900px) { .wlthead { grid-template-columns: 1fr 1fr; }
+    .wside { grid-column: 1 / -1; flex-direction: row; } }
+
+  /* ── collapsed sidebar + responsive ──────── */
+  /* collapsed: the portrait is pinned 7px past the 2px row border, NOT
+     centred in the row — centring would make its position depend on how
+     wide the browser draws the scrollbar (8px here, 10 in Chrome's
+     "thin", 12+ in Firefox) and the ☰ above it would drift. */
+  body.sc { --sidew: 64px; --portw: 40px; --portl: 9px; }
+  body.sc .tagcloud, body.sc .acct, body.sc .char .ci,
+  body.sc .bulkbar, body.sc .brand .word { display: none; }
+  body.sc .char { padding: .3rem 0 .3rem 7px; justify-content: flex-start; }
+  body.sc .char img { min-height: 40px; }
+  @media (max-width: 1100px) { :root { --sidew: 300px; } }
+  @media (max-width: 900px) {
+    :root { --sidew: 250px; --portw: 44px; }
+    .main { padding: 1rem 1.2rem; }
+  }
+  @media (max-width: 700px) {
+    :root { --sidew: 64px; --portw: 40px; --portl: 9px; }
+    .tagcloud, .acct, .char .ci, .bulkbar, .brand .word { display: none; }
+    .char { padding: .3rem 0 .3rem 7px; justify-content: flex-start; }
+    .char img { min-height: 40px; }
+  }
+</style>
+</head>
+<body data-stale="{{if .Stale}}1{{end}}" data-errors="{{join .Errors}}">
+  <script>if (localStorage.getItem('eeSidebar') === '1') document.body.classList.add('sc');</script>
+  <header class="topbar">
+    <div class="brand">
+      <button class="sidetog" id="sidetoggle" type="button" title="Свернуть/развернуть список персонажей">☰</button>
+      <span class="word">EVE <span>EMPIRE</span></span>
+    </div>
+    <ul class="menu">
+      <li><a class="toplink" href="/">Обзор</a></li>
+      {{if .Selected}}
+      <li><span>Персонаж ▾</span>
+        <ul>
+          <li><a href="/characters/{{.Selected.ID}}">Обзор</a></li>
+          <li><a href="/characters/{{.Selected.ID}}/skills">Навыки</a></li>
+          <li><a href="/characters/{{.Selected.ID}}/wallet">Кошелёк</a></li>
+          <li><a href="/characters/{{.Selected.ID}}/industry">Индустрия</a></li>
+          <li><a href="/characters/{{.Selected.ID}}/market">Маркет</a></li>
+          <li><a href="/characters/{{.Selected.ID}}/assets">Имущество</a></li>
+          <li><a href="/characters/{{.Selected.ID}}/blueprints">Чертежи</a></li>
+          <li><a href="/characters/{{.Selected.ID}}/planets">Планеты</a></li>
+          <li><a href="/characters/{{.Selected.ID}}/clones">Клоны и импланты</a></li>
+          <li><a href="/characters/{{.Selected.ID}}/mail">Почта</a></li>
+        </ul>
+      </li>
+      {{else}}
+      <li class="disabled"><span>Персонаж ▾</span></li>
+      {{end}}
+      {{if .Corporations}}
+      <li><span>Корпорация ▾</span>
+        <ul>
+          {{range .Corporations}}
+          <li class="subhead">{{.Name}}</li>
+          <li><a class="subitem" href="/corporations/{{.ID}}/info">Информация</a></li>
+          <li><a class="subitem" href="/corporations/{{.ID}}/projects">Проекты</a></li>
+          <li><a class="subitem" href="/corporations/{{.ID}}/industry">Индустрия</a></li>
+          <li><a class="subitem" href="/corporations/{{.ID}}/wallets">Кошельки</a></li>
+          <li><a class="subitem" href="/corporations/{{.ID}}/assets">Имущество</a></li>
+          {{end}}
+        </ul>
+      </li>
+      {{else}}
+      <li class="disabled"><span>Корпорация ▾</span></li>
+      {{end}}
+      <li><span>Инструменты ▾</span>
+        <ul>
+          <li class="subhead">Промышленность</li>
+          <li><a class="subitem" href="/tools/planetary">Планетарная промышленность</a></li>
+          <li><a class="subitem" href="/tools/build">Расчёт производства</a></li>
+          <li><a class="subitem soon" title="в разработке">Планировщик производства</a></li>
+          <li><a class="subitem soon" title="в разработке">Менеджмент производства</a></li>
+          <li class="subhead">Рынок и добыча</li>
+          <li><a class="subitem" href="/tools/ore">Таблица руд</a></li>
+          <li><a class="subitem" href="/tools/market">Наблюдение за рынком</a></li>
+          <li><a class="subitem" href="/tools/orders">Ордера</a></li>
+          <li class="subhead">Навыки</li>
+          <li><a class="subitem" href="/tools/skill-planner">Планировщик навыков</a></li>
+          <li class="subhead">Флот</li>
+          <li><a class="subitem" href="/tools/fleet">Управление флотом</a></li>
+        </ul>
+      </li>
+    </ul>
+    <div class="esistatus">
+      <span class="dot green" id="esistatus" title="Данные актуальны"></span>
+      <div class="gearbox">
+        <button class="gear" id="gearbtn" type="button" title="Меню">⚙</button>
+        <ul class="gearmenu" id="gearmenu">
+          <li><a href="/settings">Настройки</a></li>
+          <li><a class="disabled" title="Авторизация появится позже">Выход</a></li>
+        </ul>
+      </div>
+    </div>
+  </header>
+
+  <nav class="sidebar">
+    <div class="tagcloud" id="tagcloud">
+      <span class="tag dyn" data-tag="__online" title="показать только персонажей в игре">онлайн</span>
+      {{range .AllTags}}<span class="tag" data-tag="{{.}}">{{.}}</span>{{end}}
+    </div>
+    <div class="charlist" id="charlist">
+      {{range .Groups}}
+      <div class="group" data-account="{{.Key}}">
+        <div class="acct" draggable="true">{{.Name}}</div>
+        {{range .Chars}}
+        <a class="char{{if and $.Selected (eq $.Selected.ID .ID)}} sel{{end}}"
+           draggable="true" data-id="{{.ID}}" data-tags="{{tagsattr .Tags}}"
+           data-online="{{if .Online}}1{{end}}"
+           href="/characters/{{.ID}}{{if $.Section}}/{{$.Section}}{{end}}"
+           title="клик — открыть, Ctrl+клик — выделить для массовых действий">
+          <span class="pwrap"><img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=64" alt=""
+               class="{{if .Online}}online{{end}}">{{if .UnreadMail}}<b class="mailbadge"
+               title="непрочитанных писем: {{.UnreadMail}}">{{if gt .UnreadMail 99}}99+{{else}}{{.UnreadMail}}{{end}}</b>{{end}}</span>
+          <div class="ci">
+            <span class="nmrow"><span class="nm">{{.Name}}</span><span class="wl">{{iskshort .Wallet}}</span></span>
+            {{if .QueueSkillID}}
+            <span class="tr trq" title="{{.QueueSkill}} {{roman .QueueLevel}}">{{squares .QueueTrained .QueueLevel}}<span class="trnm">{{.QueueSkill}}</span><b data-countdown="{{.QueueEnds.Format "2006-01-02T15:04:05Z07:00"}}">…</b></span>
+            {{else if .QueuePaused}}
+            <span class="tr none">очередь на паузе</span>
+            {{else}}
+            <span class="tr none">нет обучения</span>
+            {{end}}
+            <span class="lines" title="линии: производство | наука | реакции (занято/всего)"><i class="mfg">{{.Lines.MfgBusy}}/{{.Lines.MfgTotal}}</i><span class="sep">|</span><i class="sci">{{.Lines.SciBusy}}/{{.Lines.SciTotal}}</i><span class="sep">|</span><i class="rea">{{.Lines.ReaBusy}}/{{.Lines.ReaTotal}}</i></span>
+          </div>
+        </a>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+    <div class="bulkbar" id="bulkbar">
+      Выбрано: <span class="cnt" id="bulkcnt">0</span>
+      <button id="btn-waypoint" type="button">Установить маршрут…</button>
+    </div>
+  </nav>
+
+  <main class="main" id="main">
+    {{if .Selected}}
+    <nav class="tabs">
+      <a href="/characters/{{.Selected.ID}}" {{if eq .Section ""}}class="active"{{end}}>Обзор</a>
+      <a href="/characters/{{.Selected.ID}}/skills" {{if eq .Section "skills"}}class="active"{{end}}>Навыки</a>
+      <a href="/characters/{{.Selected.ID}}/wallet" {{if eq .Section "wallet"}}class="active"{{end}}>Кошелёк</a>
+      <a href="/characters/{{.Selected.ID}}/industry" {{if eq .Section "industry"}}class="active"{{end}}>Индустрия</a>
+      <a href="/characters/{{.Selected.ID}}/market" {{if eq .Section "market"}}class="active"{{end}}>Маркет</a>
+      <a href="/characters/{{.Selected.ID}}/assets" {{if eq .Section "assets"}}class="active"{{end}}>Имущество</a>
+      <a href="/characters/{{.Selected.ID}}/blueprints" {{if eq .Section "blueprints"}}class="active"{{end}}>Чертежи</a>
+      <a href="/characters/{{.Selected.ID}}/planets" {{if eq .Section "planets"}}class="active"{{end}}>Планеты</a>
+      <a href="/characters/{{.Selected.ID}}/clones" {{if eq .Section "clones"}}class="active"{{end}}>Клоны</a>
+      <a href="/characters/{{.Selected.ID}}/mail" {{if eq .Section "mail"}}class="active"{{end}}>Почта</a>
+    </nav>
+    {{end}}
+    {{template "content" .}}
+  </main>
+
+  <div class="overlay" id="overlay"><div class="modal" id="modal"></div></div>
+  <div class="pintip" id="pintip"></div>
+
+<script>
+(function () {
+  const list = document.getElementById('charlist');
+
+  /* ── sidebar collapse toggle ────────────────────────────── */
+  document.getElementById('sidetoggle').addEventListener('click', () => {
+    const on = document.body.classList.toggle('sc');
+    localStorage.setItem('eeSidebar', on ? '1' : '0');
+  });
+
+  /* ── gear menu ──────────────────────────────────────────── */
+  const gearmenu = document.getElementById('gearmenu');
+  document.getElementById('gearbtn').addEventListener('click', e => {
+    e.stopPropagation();
+    gearmenu.classList.toggle('open');
+  });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.gearbox')) gearmenu.classList.remove('open');
+  });
+
+  /* ── settings: per-character tag editor ─────────────────── */
+  function chipTags(edit) {
+    return [...edit.querySelectorAll('.tchip')].map(c => c.dataset.tag);
+  }
+  async function postTags(id, tags) {
+    await fetch('/characters/' + id + '/tags', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'tags=' + encodeURIComponent(tags.join(', '))
+    });
+    location.reload();
+  }
+  document.addEventListener('click', e => {
+    const x = e.target.closest('.tchip .x');
+    if (!x) return;
+    const chip = x.closest('.tchip');
+    const edit = x.closest('.tagedit');
+    postTags(edit.dataset.id, chipTags(edit).filter(t => t !== chip.dataset.tag));
+  });
+  document.addEventListener('click', e => {
+    const add = e.target.closest('.tag.tadd');
+    if (!add) return;
+    const edit = add.closest('.tagedit');
+    const card = add.closest('.setchar');
+    const current = chipTags(edit);
+    const all = [...document.querySelectorAll('#tagcloud .tag:not(.dyn)')]
+      .map(t => t.dataset.tag).filter(t => !current.includes(t));
+    modal.innerHTML = '<h3>Теги — ' + card.dataset.name + '</h3>' +
+      (all.length
+        ? '<p class="muted" style="font-size:.8rem;margin:.2rem 0;">выбери из существующих:</p>' +
+          '<div class="picklist">' + all.map(t =>
+            '<span class="tag picktag" data-tag="' + t + '">' + t + '</span>').join('') + '</div>'
+        : '') +
+      '<div class="mrow"><input type="text" id="newtags" placeholder="новый тег (или несколько через запятую)">' +
+      '<button type="button" id="savetags">Сохранить</button></div>';
+    modal.dataset.forId = edit.dataset.id;
+    overlay.classList.add('visible');
+    document.getElementById('newtags').focus();
+  });
+  document.addEventListener('click', e => {
+    const pick = e.target.closest('.picktag');
+    if (pick) { pick.classList.toggle('active'); return; }
+    if (e.target.id !== 'savetags') return;
+    const id = modal.dataset.forId;
+    const edit = document.querySelector('.tagedit[data-id="' + id + '"]');
+    const picked = [...modal.querySelectorAll('.picktag.active')].map(t => t.dataset.tag);
+    const typed = (document.getElementById('newtags').value || '')
+      .split(',').map(t => t.trim()).filter(Boolean);
+    const tags = [...new Set([...chipTags(edit), ...picked, ...typed])];
+    overlay.classList.remove('visible');
+    postTags(id, tags);
+  });
+
+  /* ── ESI status + stale revalidation ────────────────────── */
+  const status = document.getElementById('esistatus');
+  function setStatus(kind, tip) {
+    status.className = 'dot ' + kind;
+    status.title = tip || {green: 'Данные актуальны', yellow: 'Загрузка данных…', red: 'Ошибка ESI'}[kind];
+  }
+  function applyErrors() {
+    const errs = document.body.dataset.errors && document.body.dataset.errors.trim();
+    if (errs) setStatus('red', errs); else setStatus('green');
+  }
+  applyErrors();
+
+  if (document.body.dataset.stale === '1') {
+    setStatus('yellow');
+    fetch(location.href, {headers: {'X-Fresh': '1'}})
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(html => {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const fresh = doc.getElementById('main');
+        if (fresh) document.getElementById('main').innerHTML = fresh.innerHTML;
+        const freshList = doc.getElementById('charlist');
+        if (freshList) list.innerHTML = freshList.innerHTML;
+        restoreSelection();
+        applyTagFilter();
+        document.body.dataset.errors = doc.body.dataset.errors || '';
+        applyErrors();
+        initCountdowns();
+        initRings();
+      })
+      .catch(e => setStatus('red', 'Не удалось обновить: ' + e.message));
+  }
+
+  /* ── colony map: cycle progress rings ───────────────────── */
+  const RING_LEN = 100.5; // 2πr for r=16
+  let ringTimer = null;
+  // Share of the running cycle already done, or null when unusable.
+  function cycleDone(el, now) {
+    const len = Number(el.dataset.cycleSec) * 1000;
+    if (!len) return null;
+    let done = 1 - (new Date(el.dataset.cycleEnd).getTime() - now) / len;
+    if (done < 0) done = 0;
+    if (done > 1) done = 1;
+    return done;
+  }
+  function tickRings() {
+    const pins = document.querySelectorAll('.pin[data-cycle-end]');
+    const bars = document.querySelectorAll('.extrcyc[data-cycle-end]');
+    const arcs = document.querySelectorAll('.parc[data-cycle-end]');
+    if (!pins.length && !bars.length && !arcs.length) {
+      if (ringTimer) { clearInterval(ringTimer); ringTimer = null; }
+      return;
+    }
+    const now = Date.now();
+    pins.forEach(pin => {
+      const prog = pin.querySelector('.pin-prog');
+      const done = cycleDone(pin, now);
+      if (!prog || done === null) return;
+      if (done >= 1) pin.classList.add('idle');
+      prog.setAttribute('stroke-dashoffset', (RING_LEN * (1 - done)).toFixed(2));
+    });
+    // the same cycle, drawn as a bar under the extraction chart
+    bars.forEach(bar => {
+      const done = cycleDone(bar, now);
+      if (done === null) return;
+      bar.firstElementChild.style.width = (done * 100).toFixed(2) + '%';
+    });
+    // planet tiles on the overview: extraction / production rings
+    arcs.forEach(arc => {
+      const done = cycleDone(arc, now);
+      const len = Number(arc.dataset.len);
+      if (done === null || !len) return;
+      arc.setAttribute('stroke-dashoffset', (len * (1 - done)).toFixed(2));
+    });
+  }
+  function initRings() {
+    if (ringTimer) clearInterval(ringTimer);
+    tickRings();
+    if (document.querySelector('.pin[data-cycle-end], .extrcyc[data-cycle-end], .parc[data-cycle-end]')) {
+      ringTimer = setInterval(tickRings, 1000);
+    }
+  }
+  initRings();
+
+  /* ── colony pin tooltip ─────────────────────────────────── */
+  (function initPinTip() {
+    const tip = document.getElementById('pintip');
+    if (!tip) return;
+    const fmtCycle = s => {
+      s = Number(s) || 0;
+      const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+      return h ? h + ' ч' + (m ? ' ' + m + ' мин' : '') : m + ' мин';
+    };
+    let current = null;
+
+    function build(pin) {
+      const d = pin.dataset;
+      let h = '<b>' + esc(d.tip) + '</b>';
+      if (d.tipOut) h += '<div class="row"><span class="k">производит:</span> ' + esc(d.tipOut) + '</div>';
+      if (d.tipIn) h += '<div class="row"><span class="k">требует за цикл:</span> ' + esc(d.tipIn) + '</div>';
+      if (d.tipCycle) h += '<div class="row"><span class="k">цикл:</span> ' + fmtCycle(d.tipCycle) + '</div>';
+      if (d.tipStore) h += '<div class="row"><span class="k">на складе:</span> ' + esc(d.tipStore) + '</div>';
+      if (d.tipIdle) {
+        h += '<div class="row err">простаивает — нет материалов</div>';
+      } else if (d.cycleEnd) {
+        const left = Math.max(0, new Date(d.cycleEnd) - Date.now());
+        const m = Math.floor(left / 60000), s = Math.floor(left % 60000 / 1000);
+        h += '<div class="row"><span class="k">до конца цикла:</span> <b>' +
+             (m ? m + ' мин ' : '') + s + ' с</b></div>';
+      }
+      return h;
+    }
+
+    function place(e) {
+      const pad = 14;
+      let x = e.clientX + pad, y = e.clientY + pad;
+      const r = tip.getBoundingClientRect();
+      if (x + r.width > innerWidth - 8) x = e.clientX - r.width - pad;
+      if (y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
+      tip.style.left = Math.max(8, x) + 'px';
+      tip.style.top = Math.max(8, y) + 'px';
+    }
+
+    // Hovering a structure highlights the flows touching it — and, for an
+    // extractor, its chart on the right: with several of them the card
+    // that belongs to the pin is otherwise anyone's guess.
+    function highlight(pin) {
+      document.querySelectorAll('.colmap-links').forEach(svg => {
+        svg.classList.toggle('dim', !!pin);
+        svg.querySelectorAll('.rt').forEach(rt => {
+          const on = pin && (rt.dataset.from === pin.dataset.pin || rt.dataset.to === pin.dataset.pin);
+          rt.classList.toggle('hot', !!on);
+        });
+      });
+      document.querySelectorAll('.extr[data-extr]').forEach(card => {
+        card.classList.toggle('hot', !!pin && card.dataset.extr === pin.dataset.pin);
+      });
+    }
+
+    document.addEventListener('mouseover', e => {
+      // extraction chart bars: instant tooltip, no native title delay
+      const bar = e.target.closest('.extrgraph rect[data-bar]');
+      if (bar) {
+        current = null;
+        const d = bar.dataset;
+        tip.innerHTML = '<b>' + esc(d.bar) + '</b>' +
+          '<div class="row"><span class="k">выработка:</span> <b>' + esc(d.barQty) + '</b> ед.</div>' +
+          (d.barAt ? '<div class="row"><span class="k">завершится:</span> ' + esc(d.barAt) + '</div>' : '');
+        tip.classList.add('on');
+        place(e);
+        return;
+      }
+      // planet tile on the overview: the card is pre-rendered server-side
+      const slot = e.target.closest('.pslot[data-pslot]');
+      if (slot) {
+        const src = slot.querySelector('.ptip-src');
+        if (!src) return;
+        current = null;
+        tip.innerHTML = src.innerHTML;
+        tip.classList.add('on');
+        place(e);
+        return;
+      }
+      const pin = e.target.closest('.pin[data-tip]');
+      if (!pin) return;
+      current = pin;
+      tip.innerHTML = build(pin);
+      tip.classList.add('on');
+      place(e);
+      highlight(pin);
+    });
+    document.addEventListener('mousemove', e => {
+      const overBar = e.target.closest('.extrgraph rect[data-bar]');
+      const overPin = e.target.closest('.pin[data-tip], .pslot[data-pslot]');
+      if (!overBar && !overPin) {
+        if (tip.classList.contains('on')) {
+          current = null;
+          tip.classList.remove('on');
+          highlight(null);
+        }
+        return;
+      }
+      place(e);
+    });
+    // Keep the countdown line fresh while hovering.
+    setInterval(() => { if (current) tip.innerHTML = build(current); }, 1000);
+  })();
+
+  /* ── live training countdown ────────────────────────────── */
+  function fmt(ms) {
+    if (ms <= 0) return 'завершено';
+    const s = Math.floor(ms / 1000);
+    const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600),
+          m = Math.floor(s % 3600 / 60), sec = s % 60;
+    if (d > 0) return d + 'д ' + h + 'ч ' + m + 'м ' + sec + 'с';
+    if (h > 0) return h + 'ч ' + m + 'м ' + sec + 'с';
+    return m + 'м ' + sec + 'с';
+  }
+  let cdTimer = null;
+  function initCountdowns() {
+    if (cdTimer) clearInterval(cdTimer);
+    const els = document.querySelectorAll('[data-countdown]');
+    if (!els.length) return;
+    const tick = () => els.forEach(el => {
+      el.textContent = fmt(new Date(el.dataset.countdown) - Date.now());
+    });
+    tick();
+    cdTimer = setInterval(tick, 1000);
+  }
+  initCountdowns();
+
+  /* ── modals ─────────────────────────────────────────────── */
+  const overlay = document.getElementById('overlay');
+  const modal = document.getElementById('modal');
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('visible'); });
+
+  /* industry job details */
+  const fmtISK = v => Number(v).toLocaleString('ru-RU', {maximumFractionDigits: 0}) + ' ISK';
+  const fmtDur = s => {
+    const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+    return (d ? d + 'д ' : '') + (h ? h + 'ч ' : '') + m + 'м';
+  };
+  const fmtDate = v => {
+    if (!v || v.startsWith('0001-')) return null;
+    return new Date(v).toLocaleString('ru-RU', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+  };
+  document.addEventListener('click', e => {
+    const row = e.target.closest('tr[data-job]');
+    if (!row) return;
+    // Links and item chips inside the row have their own destination —
+    // otherwise a click on them opens the job modal on top of it.
+    if (e.target.closest('a, .itm[data-type]')) return;
+    let j;
+    try { j = JSON.parse(row.dataset.job); } catch { return; }
+    const rows = [];
+    const add = (label, val, cls) => {
+      if (val === null || val === undefined || val === '' || val === 0) return;
+      rows.push('<tr><th>' + label + '</th><td' + (cls ? ' class="' + cls + '"' : '') + '>' + val + '</td></tr>');
+    };
+    add('Джоб ID', j.job_id);
+    add('Тип', j.is_corp ? 'корпоративный' : 'личный');
+    add('Активность', j.activity_name);
+    add('Статус', j.status, j.status === 'paused' ? 'err' : (j.status === 'active' ? 'sell' : 'muted'));
+    add('Чертёж', j.blueprint_name);
+    add('Продукт', j.product_name);
+    add('Прогонов', j.runs);
+    add('Лицензий на копии', j.licensed_runs);
+    if (j.probability && j.probability < 1) add('Вероятность', (j.probability * 100).toFixed(1) + '%');
+    add('Стоимость установки', fmtISK(j.cost), 'isk');
+    add('Длительность', fmtDur(j.duration));
+    add('Начат', fmtDate(j.start_date));
+    add('Планово готов', fmtDate(j.end_date));
+    add('На паузе с', fmtDate(j.pause_date), 'err');
+    add('Завершён', fmtDate(j.completed_date));
+    add('Успешных прогонов', j.successful_runs);
+    add('Установил', j.installer_name);
+    add('Структура', j.facility_name);
+    modal.innerHTML = '<h3>' + (j.blueprint_name || 'Джоб') + '</h3><table class="kv">' + rows.join('') + '</table>';
+    overlay.classList.add('visible');
+  });
+
+  document.addEventListener('click', async e => {
+    const row = e.target.closest('tr[data-order]');
+    if (!row) return;
+    const {char, type, location, tname, lname} = row.dataset;
+    modal.innerHTML = '<h3>' + tname + '</h3><p class="muted">' + lname + '</p><p class="muted">Загрузка стакана…</p>';
+    overlay.classList.add('visible');
+    try {
+      const r = await fetch('/api/market?char=' + char + '&type=' + type + '&location=' + location);
+      const d = await r.json();
+      if (d.error) { modal.innerHTML += '<p class="err">' + d.error + '</p>'; return; }
+      const fmtN = v => Number(v).toLocaleString('ru-RU', {maximumFractionDigits: 2});
+      const rows = (list, cls) => (list || []).slice(0, 15).map(o =>
+        '<tr' + (o.is_mine ? ' class="mine" title="мой ордер"' : '') + '><td class="' + cls + '">' + fmtN(o.price) +
+        '</td><td class="r">' + Number(o.volume_remain).toLocaleString('ru-RU') + '</td></tr>').join('')
+        || '<tr><td colspan="2" class="muted">нет</td></tr>';
+
+      let histHtml = '';
+      if (d.history && d.history.length) {
+        const h = d.history;
+        const avgs = h.map(x => x.average);
+        const min = Math.min(...avgs), max = Math.max(...avgs);
+        const w = 560, ht = 60;
+        const pts = avgs.map((v, i) =>
+          (i * w / (avgs.length - 1 || 1)).toFixed(1) + ',' +
+          (max === min ? ht / 2 : ht - (v - min) / (max - min) * ht).toFixed(1)).join(' ');
+        const vol7 = h.slice(-7).reduce((s, x) => s + x.volume, 0);
+        const last = h[h.length - 1];
+        histHtml = '<h2>История (' + h.length + ' дн.)</h2>' +
+          '<svg class="spark" viewBox="0 0 ' + w + ' ' + (ht + 4) + '" preserveAspectRatio="none">' +
+          '<polyline points="' + pts + '" fill="none" stroke="#4da3ff" stroke-width="1.5"/></svg>' +
+          '<p class="muted" style="font-size:.78rem; margin:.3rem 0 0;">' +
+          'сегодня: ' + fmtN(last.average) + ' ISK · мин ' + fmtN(min) + ' · макс ' + fmtN(max) +
+          ' · объём за 7 дн: ' + Number(vol7).toLocaleString('ru-RU') + ' шт · вчера: ' +
+          Number(last.volume).toLocaleString('ru-RU') + ' шт</p>';
+      } else if (d.history_error) {
+        histHtml = '<p class="err" style="margin-top:.8rem;">история: ' + d.history_error + '</p>';
+      }
+
+      modal.innerHTML = '<h3>' + tname + '</h3><p class="muted">' + lname + '</p>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">' +
+        '<div><h2>Продажа</h2><table><tr><th>Цена</th><th class="r">Кол-во</th></tr>' + rows(d.sells, 'sell') + '</table></div>' +
+        '<div><h2>Покупка</h2><table><tr><th>Цена</th><th class="r">Кол-во</th></tr>' + rows(d.buys, 'buy') + '</table></div></div>' +
+        histHtml;
+    } catch (err) {
+      modal.innerHTML += '<p class="err">' + err.message + '</p>';
+    }
+  });
+
+  /* ── item info modal (click any .itm chip) ──────────────── */
+  const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const squares = lvl => '<span class="sq">' +
+    [1, 2, 3, 4, 5].map(l => '<i class="' + (l <= lvl ? 'on' : '') + '"></i>').join('') + '</span>';
+  const itemChip = (id, name, extra) =>
+    '<span class="itm" data-type="' + id + '"><img class="itmico sm" src="/icons/' + id +
+    '" alt="" loading="lazy"><span class="itmnm">' + esc(name) + '</span></span>' + (extra || '');
+
+  function skillTree(list) {
+    if (!list || !list.length) return '';
+    return '<ul>' + list.map(s =>
+      '<li><div class="iskill">' + itemChip(s.type_id, s.name) +
+      '<span class="lv">' + squares(s.level) + '</span></div>' +
+      skillTree(s.nested) + '</li>').join('') + '</ul>';
+  }
+
+  const ITAB = {
+    // description arrives as sanitized HTML with item chips already in it
+    description: d => d.description
+      ? '<p class="idesc">' + d.description + '</p>'
+      : '<p class="empty">Описания нет.</p>',
+    attrs: d => (d.attrs && d.attrs.length)
+      ? d.attrs.map(a => '<div class="iattr"><span class="an">' + esc(a.Name) +
+          '</span><span class="av">' + esc(a.Value) + '</span></div>').join('')
+      : '<p class="empty">Характеристик нет.</p>',
+    skills: d => (d.skills && d.skills.length)
+      ? '<div class="iskills">' + skillTree(d.skills) + '</div>'
+      : '<p class="empty">Навыки не требуются.</p>',
+    variations: d => {
+      if (!d.variations || !d.variations.length) return '<p class="empty">Вариантов нет.</p>';
+      let html = '', lastMeta = null;
+      for (const v of d.variations) {
+        if (v.MetaName !== lastMeta) {
+          lastMeta = v.MetaName;
+          html += '<p class="imeta">' + esc(v.MetaName || 'Прочее') + '</p>';
+        }
+        html += '<div class="iattr' + (v.TypeID === d.type_id ? ' self' : '') + '">' +
+          itemChip(v.TypeID, v.Name) + '</div>';
+      }
+      return html;
+    },
+    industry: d => {
+      if (!d.blueprint || !d.blueprint.type_id) return '<p class="empty">Не производится.</p>';
+      let h = '<p class="klabel" style="margin:0 0 .3rem;">Чертёж</p><div class="iattr">' +
+        itemChip(d.blueprint.type_id, d.blueprint.name) + '</div>';
+      if (d.materials && d.materials.length) {
+        h += '<p class="klabel" style="margin:.9rem 0 .3rem;">Материалы</p>' +
+          d.materials.map(m => '<div class="iattr">' + itemChip(m.TypeID, m.Name) +
+            '<span class="av">' + m.Quantity.toLocaleString('ru-RU') + ' ед.</span></div>').join('');
+      }
+      return h;
+    },
+  };
+  ITAB.planetary = d => {
+    const pi = d.pi;
+    if (!pi) return '<p class="empty">Нет данных.</p>';
+    const row = (it, showQty) => '<div class="iattr">' +
+      itemChip(it.TypeID, it.Name) +
+      '<span class="av">' +
+      (showQty && it.Quantity ? it.Quantity.toLocaleString('ru-RU') + ' ед. ' : '') +
+      (it.TierName ? '<span class="muted">' + esc(it.TierName) + '</span>' : '') +
+      '</span></div>';
+    let h = '';
+    if (pi.Planets && pi.Planets.length) {
+      h += '<p class="bphead">Добывается на</p>' + pi.Planets.map(p => row(p, false)).join('');
+    }
+    if (pi.Inputs && pi.Inputs.length) {
+      h += '<p class="bphead">Производится из' +
+        (pi.CycleTime ? ' <span class="muted">цикл ' + fmtHMS(pi.CycleTime) +
+          (pi.OutputQty ? ' → ' + pi.OutputQty + ' ед.' : '') + '</span>' : '') + '</p>' +
+        pi.Inputs.map(i => row(i, true)).join('');
+    }
+    if (pi.MadeInto && pi.MadeInto.length) {
+      h += '<p class="bphead">Требуется для</p>' + pi.MadeInto.map(m => row(m, false)).join('');
+    }
+    return h || '<p class="empty">Нет связей.</p>';
+  };
+
+  const ITAB_LABELS = [
+    ['description', 'Описание'], ['attrs', 'Характеристики'], ['skills', 'Требования'],
+    ['variations', 'Варианты'], ['industry', 'Организация производства'],
+  ];
+
+  /* ── blueprint card ─────────────────────────────────────── */
+  const bpState = {me: 0, te: 0, runs: 1, act: 'manufacturing', copy: false};
+  // Copies can only be built or used for invention; originals can do
+  // everything except invention.
+  const bpActsFor = (acts, isCopy) => acts.filter(a => isCopy
+    ? (a.Key === 'manufacturing' || a.Key === 'invention' || a.Key === 'reaction')
+    : a.Key !== 'invention');
+  const fmtHMS = s => {
+    const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = Math.floor(s % 60);
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+  };
+  // EVE material formula: ceil(base * runs * (1 - ME/100)), never below runs.
+  const matQty = (base, me, runs) =>
+    Math.max(runs, Math.ceil(base * runs * (1 - me / 100) - 1e-9));
+
+  function bpBody(d) {
+    const bp = d.bp;
+    const acts = bpActsFor(bp.activities, bpState.copy);
+    const act = acts.find(a => a.Key === bpState.act) || acts[0];
+    if (!act) return '<p class="empty">Нет доступных операций.</p>';
+    const runs = Math.max(1, bpState.runs | 0);
+    const isMfg = act.Key === 'manufacturing' || act.Key === 'reaction';
+    const me = isMfg ? bpState.me : 0;
+    const time = Math.round(act.Time * runs * (1 - (isMfg ? bpState.te : 0) / 100));
+
+    let h = '<div class="bpacts">' + acts.map(a =>
+      '<button type="button" class="bpact' + (a.Key === act.Key ? ' on' : '') +
+      '" data-bpact="' + a.Key + '">' + esc(a.Label) + '</button>').join('') + '</div>';
+
+    h += '<div class="bprow"><span class="bplbl">' + esc(act.Label) + '</span>' +
+      '<span class="bptime">Время: <b>' + fmtHMS(time) + '</b></span></div>';
+
+    h += '<div class="bpctl">' +
+      'Прогонов <input type="number" id="bpruns" min="1" max="' + (bp.max_runs || 9999) +
+      '" value="' + runs + '">' +
+      (isMfg ? ' ME <input type="number" id="bpme" min="0" max="10" value="' + bpState.me + '">%' +
+               ' TE <input type="number" id="bpte" min="0" max="20" step="2" value="' + bpState.te + '">%' : '') +
+      '</div>';
+
+    // Straight from the card into the build calculator, carrying the
+    // runs/ME/TE the modal is showing right now.
+    if (isMfg) {
+      h += '<p style="margin:.5rem 0 0;"><a class="tog" href="/tools/build?bp=' + d.type_id +
+        '&runs=' + runs + '&me=' + me + '&te=' + (isMfg ? bpState.te : 0) +
+        '">Посчитать стоимость по Жите →</a></p>';
+    }
+
+    if (act.Products && act.Products.length) {
+      h += '<p class="bphead">Готовая продукция <span class="muted">[' + act.Products.length + ']</span></p>' +
+        act.Products.map(p => '<div class="iattr">' +
+          itemChip(p.TypeID, p.Name, '') + '<span class="av">' +
+          (p.Quantity * runs).toLocaleString('ru-RU') + ' шт.</span></div>').join('');
+    }
+    if (act.Skills && act.Skills.length) {
+      h += '<p class="bphead">Требуемые навыки <span class="muted">[' + act.Skills.length + ']</span></p>' +
+        act.Skills.map(s => '<div class="iattr">' + itemChip(s.TypeID, s.Name) +
+          '<span class="av">' + squares(s.Level) + '</span></div>').join('');
+    }
+    if (act.Materials && act.Materials.length) {
+      const groups = {};
+      for (const m of act.Materials) (groups[m.Group || 'Прочее'] ||= []).push(m);
+      h += '<p class="bphead">Требуемые комплектующие <span class="muted">[' +
+        Object.keys(groups).length + ']</span></p>';
+      for (const [g, list] of Object.entries(groups)) {
+        h += '<p class="imeta">' + esc(g) + ' <span class="muted">[' + list.length + ']</span></p>' +
+          list.map(m => '<div class="iattr">' + itemChip(m.TypeID, m.Name) +
+            '<span class="av">' + matQty(m.Quantity, me, runs).toLocaleString('ru-RU') +
+            ' шт.</span></div>').join('');
+      }
+    }
+    return h;
+  }
+
+  function renderBP(d) {
+    document.getElementById('ibody').innerHTML = bpBody(d);
+  }
+
+  /* Item modals are addressable: ?item=<typeID> (+bpc/me/te), so browser
+     back/forward walks the chain of opened items. */
+  function itemURL(typeID, isCopy, research) {
+    const p = new URLSearchParams(location.search);
+    p.set('item', typeID);
+    if (isCopy) p.set('bpc', '1'); else p.delete('bpc');
+    if (research && research.me) p.set('me', research.me); else p.delete('me');
+    if (research && research.te) p.set('te', research.te); else p.delete('te');
+    if (research && research.runs) p.set('runs', research.runs); else p.delete('runs');
+    return location.pathname + '?' + p.toString();
+  }
+  function closeURL() {
+    const p = new URLSearchParams(location.search);
+    ['item', 'bpc', 'me', 'te', 'runs'].forEach(k => p.delete(k));
+    const q = p.toString();
+    return location.pathname + (q ? '?' + q : '');
+  }
+  function closeModal() {
+    overlay.classList.remove('visible');
+    modal.className = 'modal';
+    // Push a "no modal" entry instead of walking history back: going back
+    // by depth could leave the page entirely when the chain started right
+    // after a normal navigation.
+    if (history.state && history.state.item) {
+      history.pushState({item: 0, depth: 0}, '', closeURL());
+    }
+  }
+
+  async function openItemInfo(typeID, isCopy, research, fromHistory) {
+    if (!fromHistory) {
+      history.pushState({item: typeID, bpc: isCopy ? 1 : 0,
+                         me: (research && research.me) || 0,
+                         te: (research && research.te) || 0,
+                         runs: (research && research.runs) || 0},
+                        '', itemURL(typeID, isCopy, research));
+    }
+    return openItemInfoUI(typeID, isCopy, research);
+  }
+
+  window.addEventListener('popstate', e => {
+    const st = e.state;
+    if (st && st.item) {
+      openItemInfoUI(st.item, st.bpc === 1, {me: st.me, te: st.te, runs: st.runs});
+    } else {
+      overlay.classList.remove('visible');
+      modal.className = 'modal';
+    }
+  });
+
+  async function openItemInfoUI(typeID, isCopy, research) {
+    const iconURL = '/icons/' + typeID + (isCopy ? '?bpc=1' : '');
+    modal.className = 'modal iteminfo';
+    modal.innerHTML = '<div class="ihead"><img src="' + iconURL + '" alt="">' +
+      '<div><h3>Загрузка…</h3></div></div>';
+    overlay.classList.add('visible');
+    let d;
+    try {
+      d = await (await fetch('/api/type/' + typeID)).json();
+    } catch (e) {
+      modal.innerHTML += '<p class="err" style="padding:1rem;">' + esc(e.message) + '</p>';
+      return;
+    }
+    if (!d.found) {
+      modal.innerHTML = '<div class="ihead"><img src="' + iconURL + '" alt="">' +
+        '<div><h3>Предмет ' + typeID + '</h3><p class="igrp">' + esc(d.error) + '</p></div></div>';
+      return;
+    }
+    const price = d.base_price
+      ? '<p class="iprice">Оценочная стоимость: ' +
+        Math.round(d.base_price).toLocaleString('ru-RU') + ' ISK</p>' : '';
+
+    // Blueprints get the industry card first, like the in-game window.
+    const isBP = !!d.bp;
+    const tabs = isBP
+      ? [['bp', 'Организация производства'], ['description', 'Описание'],
+         ['attrs', 'Характеристики'], ['variations', 'Варианты']]
+      : d.pi
+        ? [['description', 'Описание'], ['attrs', 'Характеристики'],
+           ['planetary', 'Планетарная промышленность']]
+        : ITAB_LABELS;
+    const ownRuns = (research && research.runs) || 0;
+    const runsNote = isBP
+      ? '<p class="igrp">' + (isCopy
+          ? (ownRuns ? 'Копия — осталось ' + ownRuns.toLocaleString('ru-RU') + ' прогонов'
+                     : 'Копия — ограниченное число прогонов')
+          : (d.bp.max_runs
+              ? 'Оригинал — до ' + d.bp.max_runs.toLocaleString('ru-RU') + ' прогонов'
+              : 'Оригинал — число прогонов не ограничено')) + '</p>'
+      : '';
+
+    modal.innerHTML =
+      '<div class="ihead"><img src="' + iconURL + '" alt="">' +
+      '<div style="min-width:0;"><h3>' + esc(d.name) + '</h3>' +
+      '<p class="igrp">' + esc(d.group) + '</p>' + price + runsNote + '</div></div>' +
+      '<nav class="itabs">' + tabs.map(([k, l], i) =>
+        '<a data-itab="' + k + '"' + (i === 0 ? ' class="active"' : '') + '>' + l + '</a>').join('') +
+      '</nav><div class="ibody" id="ibody"></div>';
+    modal._data = d;
+    if (isBP) {
+      bpState.me = (research && research.me) || 0;
+      bpState.te = (research && research.te) || 0;
+      // A copy defaults to the runs it actually has left.
+      bpState.runs = (isCopy && research && research.runs) || 1;
+      bpState.act = 'manufacturing'; bpState.copy = !!isCopy;
+      renderBP(d);
+    } else {
+      document.getElementById('ibody').innerHTML = ITAB.description(d);
+    }
+  }
+
+  document.addEventListener('click', e => {
+    const tab = e.target.closest('.itabs a[data-itab]');
+    if (tab) {
+      tab.closest('.itabs').querySelectorAll('a').forEach(a =>
+        a.classList.toggle('active', a === tab));
+      if (tab.dataset.itab === 'bp') renderBP(modal._data);
+      else document.getElementById('ibody').innerHTML = ITAB[tab.dataset.itab](modal._data);
+      return;
+    }
+    const bpact = e.target.closest('.bpact[data-bpact]');
+    if (bpact) {
+      bpState.act = bpact.dataset.bpact;
+      renderBP(modal._data);
+      return;
+    }
+    const chip = e.target.closest('.itm[data-type]');
+    if (chip) {
+      e.preventDefault();
+      e.stopPropagation();
+      openItemInfo(Number(chip.dataset.type), chip.dataset.bpc === '1', {
+        me: Number(chip.dataset.me) || 0,
+        te: Number(chip.dataset.te) || 0,
+        runs: Number(chip.dataset.runs) || 0,
+      });
+    }
+  });
+
+  // Blueprint runs / ME / TE inputs recompute the card live.
+  document.addEventListener('input', e => {
+    if (!e.target.id || !modal._data || !modal._data.bp) return;
+    const map = {bpruns: 'runs', bpme: 'me', bpte: 'te'};
+    const key = map[e.target.id];
+    if (!key) return;
+    bpState[key] = Math.max(0, Number(e.target.value) || 0);
+    const pos = e.target.id;
+    renderBP(modal._data);
+    const again = document.getElementById(pos);
+    if (again) { again.focus(); again.select(); }
+  });
+
+  // Closing goes through history so back/forward stay in sync.
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) closeModal();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && overlay.classList.contains('visible')) closeModal();
+  });
+
+  /* ── mail: letters and notifications open in the modal ────── */
+  async function openMailModal(charID, mailID) {
+    modal.className = 'modal mailinfo';
+    modal.innerHTML = '<div class="mhead"><h3>Загрузка…</h3></div>';
+    overlay.classList.add('visible');
+    let d;
+    try {
+      d = await (await fetch('/api/mail/' + charID + '/' + mailID)).json();
+    } catch (err) {
+      modal.innerHTML = '<p class="err" style="padding:1rem;">' + esc(err.message) + '</p>';
+      return;
+    }
+    if (d.error) {
+      modal.innerHTML = '<p class="err" style="padding:1rem;">' + esc(d.error) + '</p>';
+      return;
+    }
+    // d.body is sanitized server-side (same pipeline as item descriptions),
+    // so showinfo chips inside letters open the item modal as usual.
+    modal.innerHTML =
+      '<div class="mhead"><h3>' + esc(d.subject) + '</h3>' +
+      '<p class="igrp">от: ' + esc(d.from) + ' · кому: ' + esc(d.to) + '</p>' +
+      '<p class="igrp">' + esc(d.time) + '</p></div>' +
+      '<div class="mailbody">' + d.body + '</div>';
+  }
+  document.addEventListener('click', e => {
+    if (e.target.closest('a')) return; // folder/paging links keep working
+    const mr = e.target.closest('tr[data-mail]');
+    if (mr) { openMailModal(mr.dataset.char, mr.dataset.mail); return; }
+    const nr = e.target.closest('tr[data-ntext]');
+    if (nr) {
+      modal.className = 'modal mailinfo';
+      modal.innerHTML =
+        '<div class="mhead"><h3>' + esc(nr.dataset.nlabel) + '</h3>' +
+        '<p class="igrp">' + esc(nr.dataset.nmeta) + '</p></div>' +
+        (nr.dataset.ntext
+          ? '<pre class="ntext">' + esc(nr.dataset.ntext) + '</pre>'
+          : '<p class="igrp" style="margin-top:.7rem;">У уведомления нет текста.</p>');
+      overlay.classList.add('visible');
+    }
+  });
+
+  // Deep link: ?item=<id> opens the card on load (and makes it shareable).
+  (function initItemFromURL() {
+    const p = new URLSearchParams(location.search);
+    const id = Number(p.get('item'));
+    if (!id) return;
+    const st = {item: id, bpc: p.get('bpc') === '1' ? 1 : 0,
+                me: Number(p.get('me')) || 0, te: Number(p.get('te')) || 0,
+                runs: Number(p.get('runs')) || 0};
+    history.replaceState(st, '', location.href);
+    openItemInfoUI(id, st.bpc === 1, {me: st.me, te: st.te, runs: st.runs});
+  })();
+
+  /* ── wallet: pane switch (ISK / LP) + sub-tabs ───────────── */
+  document.addEventListener('click', e => {
+    const card = e.target.closest('.wcard.click');
+    if (card) {
+      document.querySelectorAll('.wcard.click').forEach(c =>
+        c.classList.toggle('active', c === card));
+      document.querySelectorAll('.wpane').forEach(p =>
+        p.hidden = p.id !== 'pane-' + card.dataset.pane);
+      return;
+    }
+    /* empire industry: the line-type tiles filter the job list; clicking
+       the active one again drops the filter */
+    const jk = e.target.closest('.pstat.pick[data-jfilter]');
+    if (jk) {
+      const off = jk.classList.contains('active');
+      const kind = off ? null : jk.dataset.jfilter;
+      document.querySelectorAll('.pstat.pick[data-jfilter]').forEach(p =>
+        p.classList.toggle('active', p === jk && !off));
+      let shown = 0;
+      document.querySelectorAll('.jobs tr[data-jkind]').forEach(tr => {
+        tr.hidden = kind !== null && tr.dataset.jkind !== kind;
+        if (!tr.hidden) shown++;
+      });
+      const none = document.getElementById('jobsnone');
+      if (none) none.hidden = shown > 0;
+      return;
+    }
+    /* empire wallets: the balance tiles pick which group is shown */
+    const pk = e.target.closest('.pstat.pick[data-wfilter]');
+    if (pk) {
+      const f = pk.dataset.wfilter;
+      document.querySelectorAll('.pstat.pick').forEach(p => p.classList.toggle('active', p === pk));
+      document.querySelectorAll('[data-wsection]').forEach(d =>
+        d.hidden = f !== 'all' && d.dataset.wsection !== f);
+      return;
+    }
+    /* empire summary: "всего" row unfolds its members */
+    const wg = e.target.closest('.wgrp[data-wtoggle]');
+    if (wg) {
+      const open = !wg.classList.contains('open');
+      wg.classList.toggle('open', open);
+      wg.closest('table').querySelectorAll(
+        '[data-wgroup="' + wg.dataset.wtoggle + '"]').forEach(tr => tr.hidden = !open);
+      return;
+    }
+    /* vertical section menu (all-alts planets) */
+    const vn = e.target.closest('.vnav a[data-vpane]');
+    if (vn) {
+      const wrap = vn.closest('.vwrap');
+      wrap.querySelectorAll('.vnav a').forEach(a => a.classList.toggle('active', a === vn));
+      wrap.querySelectorAll('[data-vpane-body]').forEach(d =>
+        d.hidden = d.dataset.vpaneBody !== vn.dataset.vpane);
+      return;
+    }
+    const st = e.target.closest('.subtabs a[data-tab]');
+    if (st) {
+      const nav = st.closest('.subtabs');
+      nav.querySelectorAll('a').forEach(a => a.classList.toggle('active', a === st));
+      st.closest('.wpane').querySelectorAll('[data-tabpane]').forEach(d =>
+        d.hidden = d.dataset.tabpane !== st.dataset.tab);
+    }
+  });
+
+  /* ── mining: tiles switch the metric, columns pick a day ──── */
+  document.addEventListener('click', e => {
+    const tile = e.target.closest('.pstat.pick[data-mfilter]');
+    if (tile) {
+      const head = tile.closest('.pheadstats');
+      head.querySelectorAll('.pstat.pick[data-mfilter]').forEach(t =>
+        t.classList.toggle('active', t === tile));
+      document.querySelectorAll('[data-mchart]').forEach(c =>
+        c.hidden = c.dataset.mchart !== tile.dataset.mfilter);
+      // remember the cut in the URL so a day click keeps it
+      const url = new URL(location.href);
+      url.searchParams.set('m', tile.dataset.mfilter);
+      history.replaceState(null, '', url);
+      return;
+    }
+    /* a column narrows every list below to that day; clicking the
+       selected column again clears the filter */
+    const col = e.target.closest('.mcol[data-day]');
+    if (col) {
+      const url = new URL(location.href);
+      if (url.searchParams.get('day') === col.dataset.day) url.searchParams.delete('day');
+      else url.searchParams.set('day', col.dataset.day);
+      location.assign(url);
+    }
+  });
+
+  /* ── ore table: the settings form re-runs itself ────────────
+     Delegated, like everything else here: #main is replaced wholesale on
+     revalidation and listeners bound to the form itself would die with it. */
+  document.addEventListener('change', e => {
+    const f = e.target.closest('form.oreset');
+    if (f) f.submit();
+  });
+
+  /* ── orders tool: market tree folds locally ──────────────────
+     The arrow and pure folders (span) toggle; groups with goods are
+     real links and load their type list from the server. */
+  document.addEventListener('click', e => {
+    const t = e.target.closest('.otreewrap .mgarr, .otreewrap span.mgn');
+    if (!t) return;
+    const li = t.closest('li');
+    if (li) li.classList.toggle('open');
+  });
+
+  /* ── orders tool: row selection with running totals ──────────
+     Delegated on document, and the picked order ids live OUTSIDE the
+     DOM: the stale-revalidation swap replaces #main wholesale, so the
+     observer below puts the selection back onto the fresh rows. */
+  (function initOrderSelection() {
+    const kept = {sell: new Set(), buy: new Set()};
+
+    function recalc(card) {
+      const out = card.querySelector('.oselsum');
+      if (!out) return;
+      const sel = [...card.querySelectorAll('tr[data-osel].on')];
+      if (!sel.length) { out.textContent = out.dataset.hint; return; }
+      const fmtQ = v => v.toLocaleString('ru-RU', {maximumFractionDigits: 0});
+      const fmtP = v => v.toLocaleString('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+      const qty = sel.reduce((s, r) => s + Number(r.dataset.q), 0);
+      const avg = sel.reduce((s, r) => s + Number(r.dataset.p), 0) / sel.length;
+      out.innerHTML = 'выделено <b>' + sel.length + '</b> орд. · количество <b>' + fmtQ(qty) +
+        '</b> · средняя цена <b>' + fmtP(avg) + '</b> ISK · стоимость <b>' + fmtP(qty * avg) + '</b> ISK';
+    }
+
+    document.addEventListener('click', e => {
+      const row = e.target.closest('tr[data-osel]');
+      // clicks on item chips open the info modal, not the selection
+      if (!row || e.target.closest('a, .itm[data-type]')) return;
+      const card = row.closest('[data-oside]');
+      if (!card) return;
+      row.classList.toggle('on');
+      const set = kept[card.dataset.oside];
+      if (set) {
+        if (row.classList.contains('on')) set.add(row.dataset.oid);
+        else set.delete(row.dataset.oid);
+      }
+      recalc(card);
+    });
+
+    const main = document.getElementById('main');
+    if (main) new MutationObserver(() => {
+      for (const side in kept) {
+        const card = document.querySelector('[data-oside="' + side + '"]');
+        if (!card) continue;
+        card.querySelectorAll('tr[data-osel]').forEach(r => {
+          if (kept[side].has(r.dataset.oid)) r.classList.add('on');
+        });
+        recalc(card);
+      }
+    }).observe(main, {childList: true});
+  })();
+
+  /* ── ore table: the reprocessing settings window ─────────────
+     Its own form, so the auto-submit above leaves it alone; the base
+     rate is previewed live from the same numbers the server used. */
+  document.addEventListener('click', e => {
+    const win = document.getElementById('refwin');
+    if (!win) return;
+    if (e.target.closest('[data-refopen]')) { win.classList.add('visible'); return; }
+    if (e.target === win || e.target.closest('[data-refclose]')) win.classList.remove('visible');
+  });
+  document.addEventListener('change', e => {
+    const f = e.target.closest('form.refset');
+    if (!f) return;
+    const pick = n => f.querySelector('[name=' + n + ']').selectedOptions[0];
+    const st = pick('struct'), rig = pick('rig'), sec = pick('sec').value;
+    let base = parseFloat(f.dataset.station) || 0.5;
+    if (st.dataset.rigs === '1') {
+      const y = parseFloat(rig.dataset.yield) || 0;
+      /* space only multiplies a RIG's bonus — an unrigged refinery is
+         worth the same in hisec and in a wormhole */
+      if (y > 0) base = y * (parseFloat(rig.dataset[sec]) || 1);
+      base *= 1 + (parseFloat(st.dataset.bonus) || 0) / 100;
+    }
+    document.getElementById('refbase').textContent = (base * 100).toFixed(1) + ' %';
+  });
+
+  /* ── corp wallet: division picker reloads with the same tab ── */
+  document.addEventListener('change', e => {
+    if (e.target.id !== 'divsel') return;
+    const t = document.querySelector('.subtabs a.active');
+    location.search = '?division=' + e.target.value +
+      '&tab=' + (t ? t.dataset.tab : 'divisions');
+  });
+
+  /* ── planetary chain tool ────────────────────────────────────
+     Event delegation on document: the stale-revalidation swap replaces
+     #main wholesale, so element-bound listeners would not survive it. */
+  (function initPlanetaryTool() {
+    const wrapOf = () => document.getElementById('piwrap');
+    const svgOf = () => document.getElementById('pilines');
+    const nodesOf = () => [...document.querySelectorAll('.pinode')];
+    const ids = el => (el.dataset.in || '').split(',').filter(Boolean);
+    const outs = el => (el.dataset.out || '').split(',').filter(Boolean);
+    let lockedIDs = new Set();
+
+    function clearMarks() {
+      nodesOf().forEach(n => n.classList.remove('sel', 'up', 'down', 'dim'));
+      document.querySelectorAll('.piplanet').forEach(p => p.classList.remove('sel', 'dim'));
+      const svg = svgOf();
+      if (svg) svg.innerHTML = '';
+    }
+
+    // Walk the chain in one direction, marking every reachable node.
+    function walk(start, dir, mark, pairs) {
+      const byID = new Map(nodesOf().map(n => [n.dataset.type, n]));
+      const seen = new Set();
+      const queue = [start];
+      while (queue.length) {
+        const el = queue.shift();
+        for (const id of (dir === 'up' ? outs(el) : ids(el))) {
+          const next = byID.get(id);
+          if (!next) continue;
+          pairs.push(dir === 'up' ? [el, next] : [next, el]);
+          if (seen.has(id)) continue;
+          seen.add(id);
+          next.classList.add(mark);
+          queue.push(next);
+        }
+      }
+    }
+
+    function line(a, b) {
+      const wrap = wrapOf(), svg = svgOf();
+      if (!wrap || !svg) return;
+      const wr = wrap.getBoundingClientRect();
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      const el = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      el.setAttribute('x1', ra.right - wr.left);
+      el.setAttribute('y1', ra.top + ra.height / 2 - wr.top);
+      el.setAttribute('x2', rb.left - wr.left);
+      el.setAttribute('y2', rb.top + rb.height / 2 - wr.top);
+      el.setAttribute('stroke', '#4da3ff');
+      el.setAttribute('stroke-width', '1');
+      el.setAttribute('opacity', '.55');
+      svg.appendChild(el);
+    }
+
+    function render() {
+      clearMarks();
+      if (!lockedIDs.size) return;
+      const nodes = nodesOf();
+      const pairs = [];
+      nodes.forEach(n => n.classList.add('dim'));
+      document.querySelectorAll('.piplanet').forEach(p => p.classList.add('dim'));
+      for (const id of lockedIDs) {
+        const el = nodes.find(n => n.dataset.type === id);
+        if (!el) continue;
+        el.classList.remove('dim');
+        el.classList.add('sel');
+        walk(el, 'up', 'up', pairs);
+        walk(el, 'down', 'down', pairs);
+        // light up the planets this raw material comes from
+        (el.dataset.planets || '').split(',').filter(Boolean).forEach(p => {
+          const pl = document.querySelector('.piplanet[data-planet="' + p + '"]');
+          if (pl) pl.classList.remove('dim');
+        });
+      }
+      nodes.forEach(n => {
+        if (n.classList.contains('up') || n.classList.contains('down') || n.classList.contains('sel')) {
+          n.classList.remove('dim');
+        }
+      });
+      // Any raw material left in the chain lights up its planets.
+      nodes.forEach(n => {
+        if (n.classList.contains('dim')) return;
+        (n.dataset.planets || '').split(',').filter(Boolean).forEach(p => {
+          const pl = document.querySelector('.piplanet[data-planet="' + p + '"]');
+          if (pl) pl.classList.remove('dim');
+        });
+      });
+      pairs.forEach(([a, b]) => line(a, b));
+    }
+
+    document.addEventListener('click', e => {
+      if (!wrapOf()) return;
+      const node = e.target.closest('.pinode');
+      if (node) {
+        if (!e.shiftKey) lockedIDs.clear();
+        lockedIDs.add(node.dataset.type);
+        render();
+        return;
+      }
+      const planet = e.target.closest('.piplanet');
+      if (planet) {
+        lockedIDs.clear();
+        clearMarks();
+        const name = planet.dataset.planet;
+        planet.classList.add('sel');
+        nodesOf().forEach(n => {
+          const has = (n.dataset.planets || '').split(',').includes(name);
+          n.classList.toggle('dim', !has);
+          if (has) n.classList.add('up');
+        });
+        document.querySelectorAll('.piplanet').forEach(p =>
+          p.classList.toggle('dim', p !== planet));
+        return;
+      }
+      if (e.target.id === 'piclear') {
+        lockedIDs.clear();
+        clearMarks();
+        const s = document.getElementById('pisearch');
+        if (s) s.value = '';
+      }
+    });
+
+    document.addEventListener('input', e => {
+      if (e.target.id !== 'pisearch') return;
+      const q = e.target.value.trim().toLowerCase();
+      lockedIDs.clear();
+      clearMarks();
+      if (!q) return;
+      nodesOf().forEach(n => n.classList.toggle('dim', !n.dataset.name.toLowerCase().includes(q)));
+    });
+
+    window.addEventListener('resize', () => { if (lockedIDs.size) render(); });
+  })();
+
+  /* ── planetary requirements calculator ──────────────────── */
+  (function initPICalc() {
+    const TIERS = ['P4', 'P3', 'P2', 'P1', 'P0'];
+    const targets = new Map(); // typeID -> qty
+
+    const recipes = () => window.PI_RECIPES || {};
+    const rec = id => recipes()[String(id)];
+    const fmtN = n => Math.round(n).toLocaleString('ru-RU');
+    const fmtISK = n => n >= 1e9 ? (n / 1e9).toFixed(2) + 'B'
+      : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M'
+      : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : Math.round(n);
+
+    function fillDatalist() {
+      const dl = document.getElementById('calclist');
+      if (!dl || dl.children.length) return;
+      const all = Object.values(recipes())
+        .filter(r => r.t !== 'P0')
+        .sort((a, b) => a.n.localeCompare(b.n));
+      dl.innerHTML = all.map(r =>
+        '<option value="' + esc(r.n) + '" data-id="' + r.id + '">' + r.t + '</option>').join('');
+    }
+
+    // Expand targets into per-tier requirements, top tier first.
+    function compute() {
+      const need = new Map();   // typeID -> units needed
+      const cycles = new Map(); // typeID -> factory cycles
+      for (const [id, q] of targets) need.set(Number(id), q);
+
+      for (const tier of TIERS) {
+        for (const [id, qty] of [...need]) {
+          const r = rec(id);
+          if (!r || r.t !== tier || !r.i || !r.i.length) continue;
+          const runs = Math.ceil(qty / (r.o || 1));
+          cycles.set(id, runs);
+          for (const [inID, inQty] of r.i) {
+            need.set(inID, (need.get(inID) || 0) + runs * inQty);
+          }
+        }
+      }
+      return {need, cycles};
+    }
+
+    function render() {
+      const box = document.getElementById('calcout');
+      const tbox = document.getElementById('calctargets');
+      if (!box || !tbox) return;
+
+      tbox.innerHTML = targets.size
+        ? [...targets].map(([id, q]) => {
+            const r = rec(id) || {n: id, t: ''};
+            return '<span class="calcchip">' + itemChip(id, r.n) +
+              '<b>×' + fmtN(q) + '</b>' +
+              '<i class="x" data-del="' + id + '" title="убрать">×</i></span>';
+          }).join('')
+        : '<p class="muted" style="font-size:.85rem;">Цели не выбраны.</p>';
+
+      if (!targets.size) { box.innerHTML = ''; return; }
+
+      const {need, cycles} = compute();
+      let html = '', rawCost = 0, targetValue = 0;
+      for (const [id, q] of targets) {
+        const r = rec(id);
+        if (r) targetValue += (r.p || 0) * q;
+      }
+
+      for (const tier of TIERS) {
+        const rows = [...need]
+          .filter(([id]) => rec(id) && rec(id).t === tier)
+          .filter(([id]) => !targets.has(String(id)) || tier !== rec(id).t || true)
+          .sort((a, b) => rec(a[0]).n.localeCompare(rec(b[0]).n));
+        if (!rows.length) continue;
+        html += '<p class="bphead">' + tier + ' <span class="muted">[' + rows.length + ']</span></p>' +
+          '<table class="calctbl"><tr><th>Материал</th><th class="r">Нужно</th>' +
+          '<th class="r">Циклов</th><th class="r">Цена</th><th class="r">Стоимость</th></tr>' +
+          rows.map(([id, qty]) => {
+            const r = rec(id);
+            const cost = (r.p || 0) * qty;
+            if (tier === 'P0') rawCost += cost;
+            return '<tr><td>' + itemChip(id, r.n) + '</td>' +
+              '<td class="r"><b>' + fmtN(qty) + '</b></td>' +
+              '<td class="r muted">' + (cycles.get(id) ? fmtN(cycles.get(id)) : '—') + '</td>' +
+              '<td class="r muted">' + (r.p ? fmtISK(r.p) : '—') + '</td>' +
+              '<td class="r isk">' + (cost ? fmtISK(cost) : '—') + '</td></tr>';
+          }).join('') + '</table>';
+      }
+
+      html += '<div class="calcsum">' +
+        '<span>Сырьё (P0) по рыночной цене: <b class="isk">' + fmtISK(rawCost) + ' ISK</b></span>' +
+        '<span>Цель по рыночной цене: <b class="isk">' + fmtISK(targetValue) + ' ISK</b></span>' +
+        (rawCost > 0 ? '<span>Наценка производства: <b class="' +
+          (targetValue > rawCost ? 'pos' : 'neg') + '">' +
+          fmtISK(targetValue - rawCost) + ' ISK</b> (' +
+          Math.round((targetValue / rawCost - 1) * 100) + '%)</span>' : '') +
+        '</div>';
+      box.innerHTML = html;
+    }
+
+    function addTarget(name, qty) {
+      const all = Object.values(recipes());
+      const r = all.find(x => x.n.toLowerCase() === name.trim().toLowerCase());
+      if (!r) return false;
+      targets.set(String(r.id), (targets.get(String(r.id)) || 0) + Math.max(1, qty | 0));
+      render();
+      return true;
+    }
+
+    document.addEventListener('click', e => {
+      const tab = e.target.closest('#pitabs a[data-pitab]');
+      if (tab) {
+        document.querySelectorAll('#pitabs a').forEach(a =>
+          a.classList.toggle('active', a === tab));
+        document.querySelectorAll('[data-pipane]').forEach(p =>
+          p.hidden = p.dataset.pipane !== tab.dataset.pitab);
+        if (tab.dataset.pitab === 'calc') { fillDatalist(); render(); }
+        return;
+      }
+      if (e.target.id === 'calcadd') {
+        const pick = document.getElementById('calcpick');
+        const qty = Number(document.getElementById('calcqty').value) || 1;
+        if (addTarget(pick.value, qty)) pick.value = '';
+        return;
+      }
+      if (e.target.id === 'calcreset') { targets.clear(); render(); return; }
+      // copy a stored colony template to the clipboard
+      const copyBtn = e.target.closest('.pitplcopy');
+      if (copyBtn) {
+        navigator.clipboard.writeText(copyBtn.dataset.payload).then(() => {
+          const old = copyBtn.textContent;
+          copyBtn.textContent = 'скопировано ✓';
+          setTimeout(() => { copyBtn.textContent = old; }, 1500);
+        });
+        return;
+      }
+      const del = e.target.closest('[data-del]');
+      if (del) { targets.delete(del.dataset.del); render(); }
+    });
+
+    // The generator form posts a type id, the visible field is a name.
+    document.addEventListener('input', e => {
+      if (e.target.id !== 'genpick') return;
+      const r = Object.values(recipes()).find(x =>
+        x.n.toLowerCase() === e.target.value.trim().toLowerCase());
+      const hidden = document.getElementById('gentarget');
+      if (hidden) hidden.value = r ? r.id : '';
+    });
+    document.addEventListener('focusin', e => {
+      if (e.target.id === 'genpick') fillDatalist();
+    });
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && e.target.id === 'calcpick') {
+        e.preventDefault();
+        const qty = Number(document.getElementById('calcqty').value) || 1;
+        if (addTarget(e.target.value, qty)) e.target.value = '';
+      }
+    });
+  })();
+
+  /* ── blueprint list: BPO/BPC filter + search ─────────────── */
+  function applyBPFilter() {
+    const active = document.querySelector('.bpfilter.active');
+    const mode = active ? active.dataset.bpf : 'all';
+    const q = ((document.getElementById('bpsearch') || {}).value || '').trim().toLowerCase();
+    document.querySelectorAll('tr.bprow').forEach(row => {
+      const isCopy = row.dataset.copy === '1';
+      const okMode = mode === 'all' || (mode === 'bpc') === isCopy;
+      const okText = !q || (row.dataset.name || '').toLowerCase().includes(q);
+      row.classList.toggle('hidden', !(okMode && okText));
+    });
+  }
+  document.addEventListener('click', e => {
+    const f = e.target.closest('.bpfilter');
+    if (!f) return;
+    document.querySelectorAll('.bpfilter').forEach(x => x.classList.toggle('active', x === f));
+    applyBPFilter();
+  });
+  document.addEventListener('input', e => {
+    if (e.target.id === 'bpsearch') applyBPFilter();
+  });
+
+  /* ── skills page: category filter + search ──────────────── */
+  function applySkillFilter() {
+    const q = ((document.getElementById('sksearch') || {}).value || '').trim().toLowerCase();
+    const sel = document.querySelector('.skcat.sel');
+    const g = sel ? sel.dataset.group : null;
+    document.querySelectorAll('.skrow').forEach(r => {
+      const ok = (!g || r.dataset.group === g) &&
+                 (!q || r.dataset.name.toLowerCase().includes(q));
+      r.style.display = ok ? '' : 'none';
+    });
+  }
+  document.addEventListener('click', e => {
+    const cat = e.target.closest('.skcat');
+    if (!cat) return;
+    const was = cat.classList.contains('sel');
+    document.querySelectorAll('.skcat.sel').forEach(c => c.classList.remove('sel'));
+    if (!was) cat.classList.add('sel');
+    applySkillFilter();
+  });
+  document.addEventListener('input', e => {
+    if (e.target.id === 'sksearch') applySkillFilter();
+  });
+
+  /* ── tag cloud filter (multi-select = OR) ───────────────── */
+  const cloud = document.getElementById('tagcloud');
+  const activeTags = new Set();
+  cloud.addEventListener('click', e => {
+    const tag = e.target.closest('.tag');
+    if (!tag) return;
+    const t = tag.dataset.tag;
+    if (activeTags.has(t)) { activeTags.delete(t); tag.classList.remove('active'); }
+    else { activeTags.add(t); tag.classList.add('active'); }
+    applyTagFilter();
+  });
+  function applyTagFilter() {
+    const wantOnline = activeTags.has('__online');
+    const plain = [...activeTags].filter(t => t !== '__online');
+    list.querySelectorAll('.char').forEach(ch => {
+      if (!activeTags.size) { ch.classList.remove('tag-hidden'); return; }
+      const tags = (ch.dataset.tags || '').split('|').filter(Boolean);
+      const ok = tags.some(t => plain.includes(t)) ||
+                 (wantOnline && ch.dataset.online === '1');
+      ch.classList.toggle('tag-hidden', !ok);
+    });
+    list.querySelectorAll('.group').forEach(g => {
+      const visible = g.querySelectorAll('.char:not(.tag-hidden)').length;
+      g.style.display = (activeTags.size && !visible) ? 'none' : '';
+    });
+  }
+
+  /* ── selection: click = open, Ctrl+click = multi-select ─── */
+  const bulkbar = document.getElementById('bulkbar');
+  const bulkcnt = document.getElementById('bulkcnt');
+  const checkedIDs = new Set();
+
+  function selectedIDs() { return [...checkedIDs]; }
+  function updateBulkbar() {
+    bulkcnt.textContent = checkedIDs.size;
+    bulkbar.classList.toggle('visible', checkedIDs.size > 0);
+  }
+  function restoreSelection() {
+    list.querySelectorAll('.char').forEach(ch => {
+      ch.classList.toggle('checked', checkedIDs.has(Number(ch.dataset.id)));
+    });
+    // Mirror selection onto empire-overview rows in the main area.
+    document.querySelectorAll('[data-empire-char]').forEach(row => {
+      row.classList.toggle('checked', checkedIDs.has(Number(row.dataset.empireChar)));
+    });
+  }
+  list.addEventListener('click', e => {
+    const ch = e.target.closest('.char');
+    if (!ch) return;
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();             // multi-select, don't navigate
+      const id = Number(ch.dataset.id);
+      if (checkedIDs.has(id)) checkedIDs.delete(id);
+      else checkedIDs.add(id);
+      restoreSelection();
+      updateBulkbar();
+    }
+    // plain click falls through: navigates and selects the character
+  });
+
+  document.getElementById('btn-waypoint').addEventListener('click', async () => {
+    const ids = selectedIDs();
+    if (!ids.length) return;
+    const system = prompt('Система назначения (например: Jita):');
+    if (!system) return;
+    const clear = confirm('Очистить текущий маршрут? (ОК — да, Отмена — добавить точкой)');
+    const resp = await fetch('/bulk/waypoint', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids, system, clear})
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Ошибка: ' + data.error); return; }
+    const fails = data.results.filter(r => r.error);
+    alert(fails.length
+      ? 'Готово с ошибками:\n' + fails.map(r => r.id + ': ' + r.error).join('\n')
+      : 'Маршрут на ' + data.system + ' установлен всем (' + data.results.length + ').');
+  });
+
+  /* ── drag & drop ordering ───────────────────────────────── */
+  let dragChar = null, dragGroup = null;
+
+  list.addEventListener('dragstart', e => {
+    const char = e.target.closest('.char');
+    const acct = e.target.closest('.acct');
+    if (char) { dragChar = char; char.classList.add('dragging'); }
+    else if (acct) { dragGroup = acct.closest('.group'); }
+    e.dataTransfer.effectAllowed = 'move';
+  });
+
+  list.addEventListener('dragover', e => {
+    e.preventDefault();
+    if (dragChar) {
+      const over = e.target.closest('.char');
+      const group = e.target.closest('.group');
+      if (over && over !== dragChar) {
+        const r = over.getBoundingClientRect();
+        over.parentNode.insertBefore(dragChar,
+          e.clientY < r.top + r.height / 2 ? over : over.nextSibling);
+      } else if (group && !over) {
+        group.appendChild(dragChar);
+      }
+    } else if (dragGroup) {
+      const over = e.target.closest('.group');
+      if (over && over !== dragGroup) {
+        const r = over.getBoundingClientRect();
+        over.parentNode.insertBefore(dragGroup,
+          e.clientY < r.top + r.height / 2 ? over : over.nextSibling);
+      }
+    }
+  });
+
+  list.addEventListener('drop', e => e.preventDefault());
+
+  list.addEventListener('dragend', async () => {
+    if (dragChar) dragChar.classList.remove('dragging');
+    if (dragChar || dragGroup) {
+      dragChar = dragGroup = null;
+      const groups = [...list.querySelectorAll('.group')].map(g => ({
+        account: g.dataset.account,
+        chars: [...g.querySelectorAll('.char')].map(c => Number(c.dataset.id))
+      })).filter(g => g.chars.length || g.account !== '');
+      await fetch('/sidebar/order', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(groups)
+      });
+    }
+  });
+})();
+
+  /* ── fleet tool ─────────────────────────────────────────────
+     Fleet data is never cached (5-second ESI cache, half the routes are
+     writes), so every action just posts and reloads. */
+  (function initFleet() {
+    const wrapOf = el => el.closest('.flwrap');
+
+    function flPost(payload) {
+      fetch('/tools/fleet/action', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      })
+        .then(r => r.json())
+        .then(d => {
+          if (d.error) { alert('ESI отказал: ' + d.error); return; }
+          location.reload();
+        })
+        .catch(e => alert('Ошибка: ' + e.message));
+    }
+
+    document.addEventListener('click', e => {
+      const b = e.target.closest('[data-flop]');
+      if (!b) return;
+      const wrap = wrapOf(b);
+      if (!wrap) return;
+      const op = b.dataset.flop;
+      const p = {
+        op: op,
+        fleet: Number(wrap.dataset.fleet),
+        via: Number(wrap.dataset.via),
+        member: Number(b.dataset.mem || 0),
+        wing: Number(b.dataset.wing || 0),
+        squad: Number(b.dataset.squad || 0)
+      };
+      if (op === 'kick' && !confirm('Выкинуть персонажа из флота?')) return;
+      if (op === 'wing-delete' && !confirm('Удалить эскадру? Она должна быть пустой.')) return;
+      if (op === 'squad-delete' && !confirm('Удалить эскадрилью? Она должна быть пустой.')) return;
+      if (op === 'wing-rename' || op === 'squad-rename') {
+        const name = prompt('Новое название:', b.dataset.name || '');
+        if (!name) return;
+        p.name = name;
+      }
+      if (op === 'settings') {
+        const box = b.closest('.flset');
+        p.motd = box.querySelector('.flmotd').value;
+        p.free = box.querySelector('.flfree').checked;
+      }
+      if (op === 'invite') {
+        const box = b.closest('.flinv');
+        p.target = box.querySelector('.fltarget').value;
+        if (b.dataset.charId) {
+          p.char_id = Number(b.dataset.charId);
+        } else {
+          p.char = (box.querySelector('.flname').value || '').trim();
+          if (!p.char) { alert('Впиши имя персонажа'); return; }
+        }
+      }
+      flPost(p);
+    });
+
+    document.addEventListener('change', e => {
+      const sel = e.target.closest('select.flmove');
+      if (sel && sel.value) {
+        const wrap = wrapOf(sel);
+        flPost({
+          op: 'move', fleet: Number(wrap.dataset.fleet), via: Number(wrap.dataset.via),
+          member: Number(sel.dataset.mem), target: sel.value
+        });
+        return;
+      }
+      if (e.target.id === 'flauto') {
+        localStorage.setItem('eeFleetAuto', e.target.checked ? '1' : '0');
+      }
+    });
+
+    /* live refresh: swap #main, exactly like the stale revalidation does */
+    function syncAuto() {
+      const box = document.getElementById('flauto');
+      if (box) box.checked = localStorage.getItem('eeFleetAuto') === '1';
+    }
+    syncAuto();
+    setInterval(() => {
+      const box = document.getElementById('flauto');
+      if (!box || !box.checked) return;
+      const a = document.activeElement;
+      // never yank the ground from under an open editor or picker
+      if (a && a.matches('textarea, select, input')) return;
+      fetch(location.href, {headers: {'X-Fresh': '1'}})
+        .then(r => r.text())
+        .then(html => {
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          const fresh = doc.getElementById('main');
+          if (!fresh) return;
+          const pane = document.querySelector('.vnav a.active');
+          document.getElementById('main').innerHTML = fresh.innerHTML;
+          syncAuto();
+          if (pane) {
+            const same = document.querySelector(
+              '.vnav a[data-vpane="' + pane.dataset.vpane + '"]');
+            if (same) same.click();
+          }
+        })
+        .catch(() => {});
+    }, 6000);
+  })();
+</script>
+</body>
+</html>
+
+{{/* planettile renders one planet slot: icon, three state rings and the
+   hover card. Shared by the character overview and the empire-wide
+   planet summary — the slot carries its own .Now for the countdowns. */}}
+{{define "planettile"}}
+    <div class="pslot{{if .Locked}} locked{{else if .Empty}} free{{end}}"{{if not (or .Locked .Empty)}} data-pslot="1"{{end}}>
+      <div class="pdisc"{{if .Locked}} title="навык «Параллельное управление наземными базами» не освоен до этого уровня"{{end}}>
+        <svg class="pslot-rings" viewBox="0 0 100 100">
+          <!-- outer: storage load, command centre excluded -->
+          <circle class="parc-track" cx="50" cy="50" r="45"/>
+          {{range .StorRing}}
+          <circle class="parc parc-stor" cx="50" cy="50" r="45" stroke="{{.Color}}"
+                  stroke-dasharray="{{.Dash}}" stroke-dashoffset="{{.Off}}"/>
+          {{end}}
+          <!-- middle: production -->
+          <circle class="parc-track" cx="50" cy="50" r="37"/>
+          {{if not (or .Locked .Empty)}}
+          <circle class="parc parc-fac{{if not .FacHas}} none{{else if .FacIdle}} stall{{end}}"
+                  cx="50" cy="50" r="37" stroke-dasharray="232.48"
+                  {{if and .FacHas (not .FacIdle) .FacSec}}stroke-dashoffset="232.48" data-len="232.48"
+                  data-cycle-end="{{.FacEnds.Format "2006-01-02T15:04:05Z07:00"}}" data-cycle-sec="{{.FacSec}}"
+                  {{else}}stroke-dashoffset="0"{{end}}/>
+          {{end}}
+          <!-- inner: extraction -->
+          <circle class="parc-track" cx="50" cy="50" r="29"/>
+          {{if not (or .Locked .Empty)}}
+          <circle class="parc parc-ext{{if not .ExtHas}} none{{else if .ExtIdle}} stall{{end}}"
+                  cx="50" cy="50" r="29" stroke-dasharray="182.21"
+                  {{if and .ExtHas (not .ExtIdle) .ExtSec}}stroke-dashoffset="182.21" data-len="182.21"
+                  data-cycle-end="{{.ExtEnds.Format "2006-01-02T15:04:05Z07:00"}}" data-cycle-sec="{{.ExtSec}}"
+                  {{else}}stroke-dashoffset="0"{{end}}/>
+          {{end}}
+        </svg>
+        {{if .Locked}}
+        <span class="pslot-lock">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="5" y="10" width="14" height="10" rx="2"/>
+            <path d="M8 10V7a4 4 0 0 1 8 0v3"/>
+          </svg>
+        </span>
+        {{else if .Empty}}
+        <span class="pslot-free">+</span>
+        {{else if .PlanetTypeID}}
+        <img src="/icons/{{.PlanetTypeID}}" alt="{{.PlanetType}}" loading="lazy">
+        {{else}}
+        <span class="pslot-free">?</span>
+        {{end}}
+      </div>
+      <p class="pcap ell">{{if .Locked}}<span class="muted">закрыто</span>
+        {{else if .Empty}}<span class="muted">свободно</span>
+        {{else}}{{.PlanetName}}{{end}}</p>
+
+      {{if not (or .Locked .Empty)}}
+      <div class="ptip-src" hidden>
+        <b>{{.PlanetName}}</b> <span class="k">{{.PlanetType}}</span>
+        <div class="row"><span class="k">{{.SystemName}} · КЦ {{.UpgradeLevel}} ур.</span></div>
+
+        <div class="row"><span class="k">буры:</span>
+          {{if not .ExtHas}}<b>нет</b>{{else if .ExtIdle}}<b class="err">стоят</b>{{else}}<b class="pos">работают</b>{{end}}</div>
+        {{range .Extractors}}
+        <div class="row" style="padding-left:.6rem;">
+          {{.Product}} — <b>{{num .QtyCycle}}</b>/цикл ({{.CycleMin}} мин)<br>
+          <span class="k">осталось добыть</span> <b>{{num .ProgLeft}}</b> ·
+          <span class="k">программа</span>
+          {{if .Expiry.Before $.Now}}<b class="err">завершена</b>{{else}}<b>{{until .Expiry $.Now}}</b>{{end}}
+        </div>
+        {{end}}
+
+        <div class="row"><span class="k">заводы:</span>
+          {{if not .FacHas}}<b>нет</b>
+          {{else}}<b class="{{if .FacIdle}}err{{else if lt .FacRun .FacTotal}}lvl{{else}}pos{{end}}">{{.FacRun}}/{{.FacTotal}}</b> работают{{end}}</div>
+
+        <div class="row"><span class="k">склады:</span>
+          {{if .CapM3}}<b class="{{if ge .LoadPc 90.0}}err{{else if ge .LoadPc 70.0}}lvl{{else}}pos{{end}}">{{printf "%.0f" .LoadPc}}%</b>
+          <span class="k">({{printf "%.0f" .UsedM3}} / {{printf "%.0f" .CapM3}} м³, без КЦ)</span>
+          {{else}}<b>нет</b>{{end}}</div>
+        {{range .Storage}}
+        <div class="row" style="padding-left:.6rem;">
+          {{.TypeName}} — {{if .CapM3}}<b class="{{if ge .LoadPc 90.0}}err{{else if ge .LoadPc 70.0}}lvl{{else}}pos{{end}}">{{printf "%.0f" .LoadPc}}%</b>
+          <span class="k">{{printf "%.0f" .UsedM3}} / {{printf "%.0f" .CapM3}} м³</span>{{else}}<span class="k">—</span>{{end}}
+        </div>
+        {{end}}
+
+        {{if .Feed}}
+        <div class="row"><span class="k">к переработке:</span></div>
+        {{range .Feed}}
+        <div class="row" style="padding-left:.6rem;">
+          {{.Name}} — <b>{{num .Stock}}</b> ·
+          {{if .Starved}}<b class="err">меньше цикла</b>{{else}}<span class="k">на</span> <b>{{num .Cycles}}</b> <span class="k">цикл.</span>{{end}}
+          <span class="k">({{num .PerCyc}}/цикл)</span>
+        </div>
+        {{end}}
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+{{end}}
+
+{{/* empiretabs is the tab strip of the empire-wide pages; the argument
+   is the key of the active tab. */}}
+{{define "empiretabs"}}
+<h1>Обзор империи</h1>
+<nav class="tabs">
+  <a href="/"{{if eq . "summary"}} class="active"{{end}}>Сводка</a>
+  <a href="/wallets"{{if eq . "wallets"}} class="active"{{end}}>Кошельки</a>
+  <a href="/training"{{if eq . "training"}} class="active"{{end}}>Обучение</a>
+  <a href="/industry"{{if eq . "industry"}} class="active"{{end}}>Производство</a>
+  <a href="/planets"{{if eq . "planets"}} class="active"{{end}}>Планеты</a>
+  <a href="/mining"{{if eq . "mining"}} class="active"{{end}}>Добыча</a>
+  <a href="/structures"{{if eq . "structures"}} class="active"{{end}}>Структуры</a>
+</nav>
+{{end}}

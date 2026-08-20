@@ -1,0 +1,228 @@
+{{define "content"}}
+<h1>Планировщик навыков</h1>
+<p class="stats">Импорт плана из игры, пересборка порядка без нарушения пререквизитов,
+подбор ремапа и имплантов. Очередь навыков ESI не пишет — готовый план копируется в клиент руками.</p>
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+{{if .NoSDE}}<p class="err">Нет sde.db — без статической базы планировщик не знает рангов и требований навыков.</p>{{end}}
+
+<form method="post" action="/tools/skill-planner" class="card" style="margin-top:0;">
+  <div class="frow" style="gap:1rem; flex-wrap:wrap; align-items:flex-end;">
+    <label class="kv" style="flex:1 1 220px;">
+      <span class="klabel">Персонаж</span>
+      <select name="char" class="inp">
+        <option value="0">— без персонажа (характеристики 17/17) —</option>
+        {{range .Chars}}<option value="{{.ID}}" {{if eq .ID $.CharID}}selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+      <span class="knote">даёт изученные уровни, текущие характеристики и импланты</span>
+    </label>
+    <label class="kv" style="flex:1 1 200px;">
+      <span class="klabel">Порядок</span>
+      <select name="mode" class="inp">
+        {{range .Modes}}<option value="{{.Key}}" {{if eq .Key $.Mode}}selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+      <span class="knote">{{range .Modes}}{{if eq .Key $.Mode}}{{.Note}}{{end}}{{end}}</span>
+    </label>
+    <label class="kv" style="flex:0 0 130px;">
+      <span class="klabel">Импланты</span>
+      <select name="grade" class="inp">
+        <option value="3" {{if eq .Grade 3}}selected{{end}}>+3 (Basic)</option>
+        <option value="4" {{if eq .Grade 4}}selected{{end}}>+4 (Standard)</option>
+        <option value="5" {{if eq .Grade 5}}selected{{end}}>+5 (Improved)</option>
+      </select>
+      <span class="knote">что оценивать</span>
+    </label>
+    <label class="kv" style="flex:0 0 150px;">
+      <span class="klabel">Потолок SP</span>
+      <input type="text" name="cap" class="inp" value="{{if .Cap}}{{.Cap}}{{end}}" placeholder="5000000">
+      <span class="knote">напр. лимит альфы</span>
+    </label>
+    <label class="kv" style="flex:0 0 auto;">
+      <span class="klabel">Считать по</span>
+      <select name="remap" class="inp">
+        <option value="1" {{if .UseRemap}}selected{{end}}>рекомендуемому ремапу</option>
+        <option value="0" {{if not .UseRemap}}selected{{end}}>текущим характеристикам</option>
+      </select>
+    </label>
+  </div>
+  <div class="frow" style="gap:.6rem; margin-top:.9rem; flex-wrap:wrap; align-items:center;">
+    <span class="klabel" style="margin:0;">Источник плана</span>
+    <button type="submit" name="src" value="queue" class="skbtn" style="width:auto; padding:0 .9rem;"
+      {{if not .CharID}}disabled title="сначала выбери персонажа"{{else}}title="взять текущую очередь навыков персонажа из игры"{{end}}>
+      ⟳ Очередь персонажа из игры</button>
+    <span class="knote" style="margin:0;">или вставь план текстом ниже
+      {{if .QueueLen}}· в очереди сейчас {{.QueueLen}} записей{{end}}</span>
+  </div>
+
+  <label class="kv" style="margin-top:.6rem; display:block;">
+    <span class="klabel">План в формате игры</span>
+    <textarea name="plan" rows="8" class="inp" style="width:100%; font-family:ui-monospace,monospace; font-size:.78rem;"
+      placeholder="&lt;localized hint=&quot;Biology&quot;&gt;Биология*&lt;/localized&gt; 4&#10;Cybernetics 3&#10;Drones V">{{.PlanText}}</textarea>
+    <span class="knote">принимается игровой формат, «Biology 4» и «Biology V»</span>
+  </label>
+  <input type="hidden" name="id" value="{{.PlanID}}">
+  <div class="frow" style="gap:.6rem; margin-top:.8rem; flex-wrap:wrap;">
+    <button type="submit" class="skbtn" style="width:auto; padding:0 .9rem;">Разобрать и оптимизировать</button>
+    <input type="text" name="name" class="inp" style="width:220px;" placeholder="название плана" value="{{.PlanName}}">
+    <button type="submit" class="skbtn" style="width:auto; padding:0 .9rem;"
+      formaction="/tools/skill-planner/save">Сохранить</button>
+  </div>
+</form>
+
+{{if .Unknown}}
+<p class="err">Не разобраны строки: {{range .Unknown}}<code>{{.}}</code> {{end}}</p>
+{{end}}
+{{if .Stuck}}
+<p class="err">Недостижимые уровни (не выполняются пререквизиты): {{range .Stuck}}<b>{{.}}</b>; {{end}}</p>
+{{end}}
+
+{{if .Plans}}
+<div class="card">
+  <h2>Сохранённые планы</h2>
+  <table class="jobs" style="width:100%;">
+    <tbody>
+    {{range .Plans}}
+      <tr>
+        <td><a href="/tools/skill-planner?id={{.ID}}&char={{.CharacterID}}">{{.Name}}</a></td>
+        <td class="muted" style="width:11rem;">{{.UpdatedAt.Format "02.01.2006 15:04"}}</td>
+        <td style="width:6rem; text-align:right;">
+          <form method="post" action="/tools/skill-planner/delete" style="display:inline;">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" class="skbtn" style="width:auto; padding:0 .5rem;">удалить</button>
+          </form>
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+
+{{if .Tips}}
+<div class="card">
+  <h2>Советы по этому плану</h2>
+  <ul style="margin:.4rem 0 0 1.1rem; line-height:1.7;">
+    {{range .Tips}}<li {{if .Sev}}class="sev-{{.Sev}}"{{end}}>{{.Text}}</li>{{end}}
+  </ul>
+</div>
+{{end}}
+
+{{if .Steps}}
+<div class="statgrid" style="margin-top:1rem;">
+  <div class="pstat"><span class="klabel">Строк</span><b>{{.Lines}}</b></div>
+  <div class="pstat"><span class="klabel">SP в плане</span><b>{{num .TotalSP}}</b></div>
+  <div class="pstat"><span class="klabel">Время</span><b>{{.TotalDur}}</b></div>
+  <div class="pstat"><span class="klabel">Конец</span><b>{{.Ends.Format "02.01.2006"}}</b></div>
+  {{if .Cap}}<div class="pstat"><span class="klabel">Остаток до потолка</span>
+    <b {{if lt .CapLeft 0}}class="sev-err"{{end}}>{{num .CapLeft}}</b></div>{{end}}
+</div>
+
+<div class="cardgrid">
+  <div class="card">
+    <h2>Ремап</h2>
+    <p class="knote">14 очков сверх базы 17, не больше +10 в один атрибут. Перебраны все раскладки,
+      целевая функция — суммарное время плана Σ SP/(осн + вторая/2).
+      {{if .RemapsLeft}}Доступно перераспределений: <b>{{.RemapsLeft}}</b>.{{end}}</p>
+    <table class="jobs" style="width:100%; margin-top:.5rem;">
+      <thead><tr><th>Раскладка</th>{{range .AttrLabels}}<th style="text-align:right;">{{.}}</th>{{end}}
+        <th style="text-align:right;">Время</th><th style="text-align:right;">Экономия</th></tr></thead>
+      <tbody>
+        <tr><td>текущие</td>{{range .CurAttrs}}<td style="text-align:right;">{{.}}</td>{{end}}
+          <td style="text-align:right;">{{.CurDur}}</td><td>—</td></tr>
+        {{range .Remaps}}
+        <tr {{if .Best}}style="font-weight:600;"{{end}}>
+          <td>{{if .Best}}лучшая{{else}}вариант{{end}}</td>
+          {{range .Attrs}}<td style="text-align:right;">{{.}}</td>{{end}}
+          <td style="text-align:right;">{{.Dur}}</td>
+          <td style="text-align:right;">{{if .Saved}}−{{.Saved}}{{else}}—{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Импланты</h2>
+    <p class="knote">Выигрыш именно на этом плане, при выбранной раскладке. Все +3 требуют Cybernetics 1,
+      +4 — Cybernetics 4, +5 — Cybernetics 5.</p>
+    <table class="jobs" style="width:100%; margin-top:.5rem;">
+      <thead><tr><th>Атрибут</th><th>Имплант</th><th style="text-align:right;">Слот</th>
+        <th style="text-align:right;">Экономия</th><th style="text-align:right;">Доля</th></tr></thead>
+      <tbody>
+        {{range .Implants}}
+        <tr>
+          <td>{{.Attr}}</td>
+          <td class="ell" title="{{.Name}}">{{.Name}}</td>
+          <td style="text-align:right;">{{.Slot}}</td>
+          <td style="text-align:right;">{{.Saved}}</td>
+          <td style="text-align:right;">{{printf "%.0f" .Pct}} %</td>
+        </tr>
+        {{end}}
+        <tr style="font-weight:600;"><td colspan="3">полный сет</td>
+          <td style="text-align:right;">{{.ImplantFull}}</td><td style="text-align:right;">100 %</td></tr>
+      </tbody>
+    </table>
+    {{with .Booster}}
+    <p class="knote" style="margin-top:.7rem;">
+      Церебральный ускоритель +{{.Bonus}} (база {{.Base}} сут, Биология {{.Biology}} → <b>{{.Days}} сут</b>):
+      внутри окна набегает <b>{{num .SP}} SP</b> сверх обычного темпа, план заканчивается на <b>{{.Saved}}</b> раньше.
+    </p>
+    {{end}}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Где план теряет время</h2>
+  <p class="knote">Скорость задаёт только пара характеристик навыка. Порядок обучения на суммарное время
+    не влияет вообще — влияет состав плана, поэтому смотреть надо сюда.</p>
+  <table class="jobs" style="width:100%; margin-top:.5rem;">
+    <thead><tr><th>Пара</th><th style="text-align:right;">SP</th><th style="text-align:right;">Доля</th>
+      <th style="text-align:right;">SP/мин</th><th style="text-align:right;">Время</th>
+      <th style="text-align:right;">Потеря</th><th>Навыки</th></tr></thead>
+    <tbody>
+      {{range .Pairs}}
+      <tr>
+        <td>{{.Pair}}</td>
+        <td style="text-align:right;">{{num .SP}}</td>
+        <td style="text-align:right;">{{printf "%.1f" .Share}} %</td>
+        <td style="text-align:right;">{{.Rate}}</td>
+        <td style="text-align:right;">{{.Dur}}</td>
+        <td style="text-align:right;" {{if .HasLost}}class="sev-warn"{{end}}>{{if .HasLost}}+{{.Lost}}{{else}}—{{end}}</td>
+        <td class="ell" title="{{.Skills}}">{{.Skills}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>План</h2>
+  <table class="jobs" style="width:100%;">
+    <thead><tr><th style="width:3rem;">№</th><th>Навык</th><th style="width:3rem;">Ур.</th>
+      <th style="text-align:right;">SP</th><th style="text-align:right;">SP/мин</th>
+      <th style="text-align:right;">Время</th><th style="text-align:right;">Накоплено</th>
+      <th style="text-align:right;">Готово</th></tr></thead>
+    <tbody>
+      {{range .Steps}}
+      <tr {{if .Over}}class="muted"{{end}} {{if .Cross}}style="border-top:2px solid var(--err,#c33);"{{end}}>
+        <td>{{.N}}</td>
+        <td class="ell" title="{{.Name}} — {{.Pair}}, ранг {{.Rank}}">{{.Name}}</td>
+        <td>{{.Level}}</td>
+        <td style="text-align:right;">{{num .SP}}</td>
+        <td style="text-align:right;" {{if .Slow}}class="sev-warn"{{end}}>{{.Rate}}</td>
+        <td style="text-align:right;">{{.Dur}}</td>
+        <td style="text-align:right;">{{num .CumSP}}</td>
+        <td style="text-align:right;">{{.Done}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Экспорт в игру</h2>
+  <textarea rows="10" class="inp" readonly
+    style="width:100%; font-family:ui-monospace,monospace; font-size:.75rem;">{{.Export}}</textarea>
+</div>
+{{end}}
+{{end}}

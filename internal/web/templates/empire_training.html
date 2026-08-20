@@ -1,0 +1,81 @@
+{{define "content"}}
+{{template "empiretabs" "training"}}
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+<div class="card phead">
+  <div class="pheadstats">
+    <div class="pstat">
+      <p class="klabel">Учатся</p>
+      <p class="kval {{if .IdleQueues}}neg{{else}}pos{{end}}">{{sub (len .Chars) .IdleQueues}}/{{len .Chars}}</p>
+      <p class="knote muted">{{if .IdleQueues}}<span class="sev-err">без обучения: {{.IdleQueues}}</span>{{else}}все альты в очереди{{end}}</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Очереди на паузе</p>
+      <p class="kval {{if .PausedQueues}}neg{{else}}pos{{end}}">{{.PausedQueues}}</p>
+      <p class="knote muted">навыки стоят, время идёт</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Ближайшее завершение</p>
+      {{$next := index .Soonest 0}}
+      {{if $next.QueueSkillID}}
+      <p class="kval"><b data-countdown="{{$next.QueueEnds.Format "2006-01-02T15:04:05Z07:00"}}">…</b></p>
+      <p class="knote muted">{{$next.Name}} · {{$next.QueueSkill}} {{roman $next.QueueLevel}}</p>
+      {{else}}
+      <p class="kval muted">—</p>
+      <p class="knote muted">никто не учится</p>
+      {{end}}
+    </div>
+    <div class="pstat">
+      <p class="klabel">Показано</p>
+      <p class="kval">{{.Shown}} <span class="muted" style="font-size:.8rem;">навыков</span></p>
+      <p class="knote muted">следующих в очереди каждого альта</p>
+    </div>
+  </div>
+</div>
+
+<div class="trgrid">
+  {{range .Chars}}
+  <div class="card trcard" data-empire-char="{{.ID}}">
+    <div class="trhead">
+      <img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=64" alt=""
+           class="{{if .Online}}online{{end}}">
+      <div style="min-width:0;">
+        <p class="trnm2 ell"><a class="alink" href="/characters/{{.ID}}/skills">{{.Name}}</a></p>
+        <p class="knote muted ell">{{num .Trained}} СП{{if .Account}} · {{.Account}}{{end}}</p>
+      </div>
+      <div class="trsum">
+        {{if .Paused}}<b class="sev-warn">пауза</b>
+        {{else if .Rows}}<b>{{.TotalDur}}</b>
+          <span class="dt muted">до {{.PlanEnds.Format "02.01.2006"}}</span>
+        {{else}}<b class="sev-err">пусто</b>{{end}}
+      </div>
+    </div>
+
+    {{if .Rows}}
+    <div class="skqueue trq5">
+      {{range .Rows}}
+      <div class="qrow{{if .Active}} qactive{{end}}">
+        {{squares .TrainedNow .FinishedLevel}}
+        <span class="nm" title="{{.SkillName}} {{roman .FinishedLevel}}">{{item .SkillID .SkillName}} <b class="lvl">{{roman .FinishedLevel}}</b></span>
+        <span class="tm">
+          {{if .Active}}<b data-countdown="{{.FinishDate.Format "2006-01-02T15:04:05Z07:00"}}">…</b>
+          {{else if .Dur}}<b>{{.Dur}}</b>
+          {{else}}<span class="muted">пауза</span>{{end}}
+          {{if not .FinishDate.IsZero}}<span class="dt">~ {{.FinishDate.Format "02.01.2006"}}</span>{{end}}
+        </span>
+      </div>
+      {{end}}
+    </div>
+    <p class="knote muted">
+      {{if .More}}<a class="alink" href="/characters/{{.ID}}/skills">…и ещё {{.More}} в плане</a> ·
+      {{num .PlanSP}} СП всего{{else}}<a class="alink" href="/characters/{{.ID}}/skills">вся очередь</a> ·
+      {{num .PlanSP}} СП в плане{{end}}</p>
+
+    {{else}}
+    <p class="sev-err" style="margin:.6rem 0 0; font-size:.82rem;">Очередь обучения пуста!</p>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}

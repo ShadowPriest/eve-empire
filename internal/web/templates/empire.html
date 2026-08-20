@@ -1,0 +1,88 @@
+{{define "content"}}
+{{template "empiretabs" "summary"}}
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+<div class="cardgrid">
+
+  <!-- wallets: the two totals are the list, each unfolds its members -->
+  <div class="card">
+    <h2>Кошельки <a class="more" href="/wallets">подробно →</a></h2>
+    <table class="wtree">
+      <tr class="wgrp" data-wtoggle="chars">
+        <th><span class="tw">▸</span> Персонажи всего <span class="muted">{{len .CharWallets}}</span></th>
+        <th class="r isk">{{isk .CharTotal}}</th>
+      </tr>
+      {{range .CharWallets}}
+      <tr class="wsub" data-wgroup="chars" data-empire-char="{{.ID}}" hidden>
+        <td><a class="alink" href="/characters/{{.ID}}/wallet">{{.Name}}</a>{{if .Account}}
+          <span class="muted" style="font-size:.72rem;">· {{.Account}}</span>{{end}}</td>
+        <td class="r isk">{{isk .Wallet}}</td>
+      </tr>
+      {{end}}
+
+      <tr class="wgrp" data-wtoggle="corps">
+        <th><span class="tw">▸</span> Корпорации всего <span class="muted">{{len .CorpRows}}</span></th>
+        <th class="r isk">{{isk .CorpTotal}}</th>
+      </tr>
+      {{range .CorpRows}}
+      <tr class="wsub" data-wgroup="corps" hidden>
+        <td><a class="alink" href="/corporations/{{.Corp.ID}}/wallets">{{.Corp.Name}}</a></td>
+        <td class="r">{{if .OK}}<span class="isk">{{isk .Total}}</span>{{else}}<span class="muted">{{.Note}}</span>{{end}}</td>
+      </tr>
+      {{end}}
+
+      <tr class="wtot"><th>Общий баланс</th><th class="r isk">{{isk .GrandTotal}}</th></tr>
+    </table>
+  </div>
+
+  <!-- training: nearest finish first -->
+  <div class="card">
+    <h2>Обучение <a class="more" href="/training">подробно →</a></h2>
+    <table class="trtab">
+      {{range .Training}}
+      <tr class="trrow{{if .QueueSkillID}} qactive{{end}}" data-empire-char="{{.ID}}">
+        <td class="who"><a class="alink" href="/characters/{{.ID}}/skills">{{.Name}}</a></td>
+        {{if .QueueSkillID}}
+        <td class="sqc">{{squares .QueueTrained .QueueLevel}}</td>
+        <td class="ell" title="{{.QueueSkill}} {{roman .QueueLevel}}">{{.QueueSkill}}</td>
+        <td class="lvc"><b class="lvl">{{roman .QueueLevel}}</b></td>
+        <td class="r nowrap tmc"><b data-countdown="{{.QueueEnds.Format "2006-01-02T15:04:05Z07:00"}}">…</b></td>
+        {{else if .QueuePaused}}
+        <td class="sqc">{{squares 0 0}}</td>
+        <td colspan="3"><span class="sev-warn">очередь на паузе</span></td>
+        {{else}}
+        <td class="sqc">{{squares 0 0}}</td>
+        <td colspan="3"><span class="sev-err">очередь пуста!</span></td>
+        {{end}}
+      </tr>
+      {{end}}
+    </table>
+    <p class="knote muted" style="margin-top:.7rem;">
+      {{if .IdleQueues}}<span class="sev-err">не обучаются: {{.IdleQueues}}</span>{{else}}все альты учатся{{end}}</p>
+  </div>
+
+  <!-- industry lines -->
+  <div class="card">
+    <h2>Линии производства <a class="more" href="/industry">подробно →</a></h2>
+    <table>
+      <tr><th>Персонаж</th><th class="r">Произв.</th><th class="r">Наука</th><th class="r">Реакции</th></tr>
+      {{range .Chars}}
+      <tr data-empire-char="{{.ID}}">
+        <td><a class="alink" href="/characters/{{.ID}}/industry">{{.Name}}</a></td>
+        <td class="lines r"><i class="mfg">{{.Lines.MfgBusy}}/{{.Lines.MfgTotal}}</i></td>
+        <td class="lines r"><i class="sci">{{.Lines.SciBusy}}/{{.Lines.SciTotal}}</i></td>
+        <td class="lines r"><i class="rea">{{.Lines.ReaBusy}}/{{.Lines.ReaTotal}}</i></td>
+      </tr>
+      {{end}}
+      {{$l := .LineTotals}}
+      <tr class="wtot">
+        <th>Всего</th>
+        <th class="lines r"><i class="mfg">{{$l.MfgBusy}}/{{$l.MfgTotal}}</i></th>
+        <th class="lines r"><i class="sci">{{$l.SciBusy}}/{{$l.SciTotal}}</i></th>
+        <th class="lines r"><i class="rea">{{$l.ReaBusy}}/{{$l.ReaTotal}}</i></th>
+      </tr>
+    </table>
+  </div>
+</div>
+{{end}}

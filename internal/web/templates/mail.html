@@ -1,0 +1,73 @@
+{{define "content"}}
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{$char := .Selected.ID}}
+<div class="wpane">
+  <nav class="tabs subtabs" style="margin-top:0;">
+    <a data-tab="mail" class="active">Письма</a>
+    <a data-tab="notif">Уведомления <span class="muted">({{len .Notifs}})</span></a>
+  </nav>
+
+  <!-- ── mail ── -->
+  <div data-tabpane="mail">
+    <div class="vwrap">
+      <nav class="vnav">
+        {{range .Folders}}
+        <a href="{{.Query}}"{{if .Active}} class="active"{{end}}>{{if .List}}✉ {{end}}{{.Name}}
+          {{if .Unread}}<span class="cnt"><b class="lvl">{{.Unread}}</b></span>{{end}}</a>
+        {{end}}
+      </nav>
+
+      <div class="vbody">
+        <div class="card">
+          {{if .Rows}}
+          <table class="mailtab">
+            <tr><th style="width:26%;">Корреспондент</th><th>Тема</th><th class="r" style="width:9rem;">Дата</th></tr>
+            {{range .Rows}}
+            <tr class="mailrow{{if .Unread}} unread{{end}}" data-mail="{{.ID}}" data-char="{{$char}}"
+                title="открыть письмо">
+              <td class="ell">{{if .Sent}}<span class="muted">→</span> {{end}}{{.Corr}}</td>
+              <td class="ell">{{.Subject}}</td>
+              <td class="r muted" style="white-space:nowrap;">{{.Time.Format "02.01.2006 15:04"}}</td>
+            </tr>
+            {{end}}
+          </table>
+          <div class="frow" style="justify-content:space-between; margin-top:.6rem;">
+            {{if .Paged}}<a class="alink" href="{{.Base}}">← к свежим</a>{{else}}<span></span>{{end}}
+            {{if .OlderBefore}}<a class="alink" href="{{.Base}}&before={{.OlderBefore}}">старше →</a>{{end}}
+          </div>
+          {{else}}
+          <p class="muted">В этой папке писем нет{{if .Paged}} (старше уже ничего){{end}}.</p>
+          {{if .OlderBefore}}<p style="margin:.4rem 0 0;"><a class="alink" href="{{.Base}}&before={{.OlderBefore}}">искать дальше →</a></p>{{end}}
+          {{end}}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── notifications: the in-game mail window's second tab ── -->
+  <div data-tabpane="notif" hidden>
+    <div class="card">
+      {{if .Notifs}}
+      <table class="mailtab ntab">
+        <tr><th style="width:9rem;">Когда</th><th style="width:34%;">Событие</th><th>От кого</th></tr>
+        {{range .Notifs}}
+        <tr class="mailrow" data-ntext="{{.Text}}" data-nlabel="{{.Label}}"
+            data-nmeta="{{if .Sender}}{{.Sender}} · {{end}}{{.Time.Format "02.01.2006 15:04"}}"
+            title="открыть уведомление">
+          <td class="muted" style="white-space:nowrap;">{{.Time.Format "02.01.2006 15:04"}}</td>
+          <td class="ell"><span class="{{.Sev}}">{{.Label}}</span></td>
+          <td class="ell muted">{{.Sender}}</td>
+        </tr>
+        {{end}}
+      </table>
+      <p class="muted" style="font-size:.7rem; margin:.6rem 0 0;">
+        Это вторая вкладка игровой почты: служебные уведомления агентов, страховки,
+        войн, структур и т.п. Окно хранения задаёт ESI.</p>
+      {{else}}
+      <p class="muted">Уведомлений нет.</p>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}

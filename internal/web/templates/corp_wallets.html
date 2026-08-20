@@ -1,0 +1,94 @@
+{{define "content"}}
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{if .Wallets}}
+<div class="wlthead corpw">
+  <div class="wcard active isk-card corpsel">
+    <span class="wico">Ƶ</span>
+    <div style="min-width:0;">
+      <p class="wlbl">
+        <select id="divsel" title="Выбрать счёт">
+          {{range .Wallets}}
+          <option value="{{.Division}}" {{if eq .Division $.Division}}selected{{end}}>{{.Name}}</option>
+          {{end}}
+        </select>
+      </p>
+      <p class="wval">{{isk .SelBalance}}</p>
+    </div>
+  </div>
+  <div class="wside">
+    <div class="wcard" title="Корпоративные наградные баллы — ESI их не отдаёт">
+      <span class="wico">◈</span><p class="muted">— корп. НБ</p>
+    </div>
+    <div class="wcard" title="Корпоративные EverMarks — ESI их не отдаёт">
+      <span class="wico">✦</span><p class="muted">— EverMarks</p>
+    </div>
+  </div>
+</div>
+
+<div class="wpane" id="pane-isk">
+  <nav class="tabs subtabs">
+    <a data-tab="divisions" {{if eq .Tab "divisions"}}class="active"{{end}}>Подразделения</a>
+    <a data-tab="invoices" {{if eq .Tab "invoices"}}class="active"{{end}}>Инвойсы</a>
+    <a data-tab="journal" {{if eq .Tab "journal"}}class="active"{{end}}>Транзакции</a>
+    <a data-tab="market" {{if eq .Tab "market"}}class="active"{{end}}>Операции в торговой системе</a>
+  </nav>
+
+  <div data-tabpane="invoices" {{if ne .Tab "invoices"}}hidden{{end}}>
+    <p class="muted" style="margin-top:2.5rem; text-align:center;">Не найдено транзакций
+      <br><span style="font-size:.78rem;">ESI не отдаёт корпоративные инвойсы</span></p>
+  </div>
+
+  <div data-tabpane="journal" {{if ne .Tab "journal"}}hidden{{end}}>
+    {{if .Journal}}
+    <table>
+      <tr><th>Дата</th><th>Тип</th><th class="r">Кол-во</th><th class="r">Баланс</th><th>Описание</th></tr>
+      {{range .Journal}}
+      <tr>
+        <td class="muted" style="white-space:nowrap;">{{.Date.Format "2006.01.02 15:04"}}</td>
+        <td>{{.TypeRu}}</td>
+        <td class="r {{if lt .Amount 0.0}}neg{{else}}pos{{end}}" style="white-space:nowrap;">{{isk .Amount}}</td>
+        <td class="r muted" style="white-space:nowrap;">{{isk .Balance}}</td>
+        <td class="muted ell" style="max-width:640px;">{{.Description}}</td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}<p class="muted" style="margin-top:1rem;">Журнал «{{.SelName}}» пуст.</p>{{end}}
+  </div>
+
+  <div data-tabpane="market" {{if ne .Tab "market"}}hidden{{end}}>
+    {{if .Transactions}}
+    <table>
+      <tr><th>Дата</th><th>Тип</th><th>Предмет</th><th class="r">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th><th>Где</th></tr>
+      {{range .Transactions}}
+      <tr>
+        <td class="muted" style="white-space:nowrap;">{{.Date.Format "2006.01.02 15:04"}}</td>
+        <td>{{if .IsBuy}}<span class="buy">BUY</span>{{else}}<span class="sell">SELL</span>{{end}}</td>
+        <td>{{.TypeName}}</td>
+        <td class="r">{{num .Quantity}}</td>
+        <td class="r">{{isk .UnitPrice}}</td>
+        <td class="r {{if .IsBuy}}neg{{else}}pos{{end}}" style="white-space:nowrap;">{{if .IsBuy}}−{{else}}+{{end}}{{isk .Total}}</td>
+        <td class="muted ell">{{.LocationName}}</td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}<p class="muted" style="margin-top:1rem;">Операций у «{{.SelName}}» нет.</p>{{end}}
+  </div>
+
+  <div data-tabpane="divisions" {{if ne .Tab "divisions"}}hidden{{end}}>
+    <table class="maxs">
+      <tr><th>Счёт</th><th class="r">Баланс</th></tr>
+      {{range .Wallets}}
+      <tr{{if eq .Division $.Division}} class="mine"{{end}}>
+        <td>{{.Name}} <span class="muted">[{{.Division}}]</span></td>
+        <td class="r isk">{{isk .Balance}}</td>
+      </tr>
+      {{end}}
+      <tr><th>Всего</th><th class="r isk">{{isk .Total}}</th></tr>
+    </table>
+  </div>
+</div>
+{{else if not .Errors}}
+<p class="muted">Нет данных.</p>
+{{end}}
+{{end}}

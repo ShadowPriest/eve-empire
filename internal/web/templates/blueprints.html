@@ -1,0 +1,35 @@
+{{define "content"}}
+<h1>{{.Selected.Name}} — чертежи</h1>
+<p class="stats">Оригиналов: <b>{{.Originals}}</b> &nbsp;·&nbsp; Копий: <b>{{.Copies}}</b>
+  &nbsp;·&nbsp; клик по чертежу — карточка производства с его ME/TE</p>
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{if .Blueprints}}
+<div class="frow" style="margin:.6rem 0 .2rem;">
+  <span class="tag bpfilter active" data-bpf="all">все</span>
+  <span class="tag bpfilter" data-bpf="bpo">оригиналы</span>
+  <span class="tag bpfilter" data-bpf="bpc">копии</span>
+  <input type="search" id="bpsearch" placeholder="🔍 поиск по названию" autocomplete="off">
+</div>
+
+<table style="margin-top:.6rem;">
+  <tr>
+    <th>Чертёж</th><th>Тип</th><th class="r">ME</th><th class="r">TE</th>
+    <th class="r">Прогонов</th><th>Где</th>
+  </tr>
+  {{range .Blueprints}}
+  <tr class="bprow" data-copy="{{if .IsCopy}}1{{end}}" data-name="{{.TypeName}}">
+    <td>{{chip .}}</td>
+    <td>{{if .IsCopy}}<span class="badge bpc">копия</span>{{else}}<span class="badge">оригинал</span>{{end}}</td>
+    <td class="r"><b class="lvl">{{.ME}}%</b></td>
+    <td class="r"><b class="lvl">{{.TE}}%</b></td>
+    <td class="r">{{if lt .Runs 0}}<span class="muted">∞</span>{{else}}{{num .Runs}}{{end}}</td>
+    <td class="muted ell">{{.Location}}</td>
+  </tr>
+  {{end}}
+</table>
+{{else if not .Errors}}
+<p class="muted" style="margin-top:1rem;">Чертежей нет.</p>
+{{end}}
+{{end}}

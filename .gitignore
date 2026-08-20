@@ -1,0 +1,19 @@
+# секреты и локальные данные
+.env
+*.db
+*.db-wal
+*.db-shm
+
+# личные файлы владельца, не имеющие отношения к коду
+ROS config.txt
+skill-plan*.txt
+
+# среды разработки
+.idea/
+.vscode/
+.claude/
+
+# сборка
+*.exe
+/eve-empire
+/dist/

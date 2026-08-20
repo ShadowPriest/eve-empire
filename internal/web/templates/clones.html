@@ -1,0 +1,84 @@
+{{define "content"}}
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+{{if not .SDEReady}}
+<p class="err">Статическая база sde.db не найдена — импланты показаны без бонусов и слотов.</p>
+{{end}}
+
+<div class="cols2" style="max-width:1300px;">
+
+  <!-- active clone -->
+  <div>
+    <h2>Активный клон</h2>
+    <div class="card" style="margin-top:0;">
+      {{if .HomeLocation}}<p class="klabel">Домашняя станция: <b>{{.HomeLocation}}</b></p>{{end}}
+      {{if .ActiveImplants}}
+      <table style="margin-top:.5rem;">
+        <tr><th style="width:34px;">№</th><th>Имплант</th><th>Бонусы</th></tr>
+        {{range .ActiveImplants}}
+        <tr>
+          <td class="muted">{{if .Slot}}{{.Slot}}{{else}}—{{end}}</td>
+          <td>{{item .TypeID .Name}}</td>
+          <td class="lvl">{{range $i, $b := .Bonuses}}{{if $i}}, {{end}}{{$b}}{{end}}</td>
+        </tr>
+        {{end}}
+      </table>
+      {{else}}<p class="muted" style="margin:.5rem 0 0;">Имплантов нет.</p>{{end}}
+    </div>
+
+    <h2>Характеристики</h2>
+    {{template "attrtable" .}}
+    {{if .RawAttrs}}
+    <p class="muted" style="font-size:.75rem; margin-top:.5rem;">
+      Бонусных ремапов: <b>{{.RawAttrs.BonusRemaps}}</b>
+      {{if not .RawAttrs.LastRemap.IsZero}} · последний ремап {{.RawAttrs.LastRemap.Format "02.01.2006"}}{{end}}
+    </p>
+    {{end}}
+  </div>
+
+  <!-- jump clones -->
+  <div>
+    <h2>Джамп-клоны <span class="muted">({{len .JumpClones}})</span></h2>
+    {{if .LastJump}}
+    <p class="muted" style="font-size:.75rem; margin:0 0 .6rem;">
+      последний прыжок: {{.LastJump.Format "02.01.2006 15:04"}}</p>
+    {{end}}
+    {{range .JumpClones}}
+    <div class="card" style="margin-top:0; margin-bottom:.6rem;">
+      <p class="klabel" style="color:#e8eef7; font-size:.95rem;">{{.Name}}</p>
+      <p class="muted" style="font-size:.8rem; margin:.15rem 0 .4rem;">{{.Location}}</p>
+      {{if .Implants}}
+      <table>
+        <tr><th style="width:34px;">№</th><th>Имплант</th><th>Бонусы</th></tr>
+        {{range .Implants}}
+        <tr>
+          <td class="muted">{{if .Slot}}{{.Slot}}{{else}}—{{end}}</td>
+          <td>{{item .TypeID .Name}}</td>
+          <td class="lvl">{{range $i, $b := .Bonuses}}{{if $i}}, {{end}}{{$b}}{{end}}</td>
+        </tr>
+        {{end}}
+      </table>
+      {{else}}<p class="muted" style="font-size:.8rem; margin:0;">Пустой клон.</p>{{end}}
+    </div>
+    {{else}}
+    <p class="muted">Джамп-клонов нет.</p>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "attrtable"}}
+{{if .Attrs}}
+<table class="attrs maxs">
+  <tr><th>Характеристика</th><th class="r">База</th><th class="r">Импланты</th><th class="r">Итого</th></tr>
+  {{range .Attrs}}
+  <tr>
+    <td>{{.Label}}</td>
+    <td class="r muted">{{.Base}}</td>
+    <td class="r">{{if .Implant}}<span class="lvl">+{{.Implant}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+    <td class="r"><b>{{.Total}}</b></td>
+  </tr>
+  {{end}}
+</table>
+{{else}}<p class="muted">Нет данных о характеристиках.</p>{{end}}
+{{end}}

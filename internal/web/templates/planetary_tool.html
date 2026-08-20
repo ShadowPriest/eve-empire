@@ -1,0 +1,180 @@
+{{define "content"}}
+<h1>Планетарная промышленность</h1>
+
+{{if not .SDEReady}}
+<p class="err">Статическая база sde.db не найдена — запусти sdeimport.</p>
+{{end}}
+
+<script>window.PI_RECIPES = {{.RecipesJSON}};</script>
+
+<nav class="tabs subtabs" id="pitabs" style="margin-top:.4rem;">
+  <a data-pitab="chain" {{if ne .Tab "templates"}}class="active"{{end}}>Схема производства</a>
+  <a data-pitab="calc">Расчёт потребностей</a>
+  <a data-pitab="templates" {{if eq .Tab "templates"}}class="active"{{end}}>Шаблоны заводов
+    <span class="muted">[{{len .Templates}}]</span></a>
+</nav>
+
+<!-- ── chain ── -->
+<div data-pipane="chain" {{if eq .Tab "templates"}}hidden{{end}}>
+<div class="pihead">
+  <p class="stats" style="margin:0;">Клик по товару — подсветка всей цепочки ·
+    клик по планете — её сырьё · Shift+клик — зафиксировать несколько</p>
+  <div class="frow">
+    <input type="search" id="pisearch" placeholder="🔍 поиск товара" autocomplete="off">
+    <button type="button" id="piclear">сбросить</button>
+  </div>
+</div>
+
+<div class="piscroll">
+<div class="piwrap" id="piwrap">
+  <svg class="pilines" id="pilines"></svg>
+
+  <!-- planets -->
+  <div class="picol picol-planets">
+    <div class="pitier"><b>Планеты</b></div>
+    {{range .Planets}}
+    <div class="piplanet" data-planet="{{.Name}}" title="{{.Name}}">
+      <img src="/icons/{{.TypeID}}" alt="" loading="lazy">
+      <span>{{.Name}}</span>
+    </div>
+    {{end}}
+  </div>
+
+  <!-- tiers -->
+  {{$tn := .TierNames}}
+  {{range $ti, $tier := .Tiers}}
+  <div class="picol" data-tier="{{$tier}}">
+    <div class="pitier"><b>{{index $tn $tier}}</b><span class="muted">{{$tier}}</span></div>
+    {{range index $.Nodes $tier}}
+    <div class="pinode" data-type="{{.TypeID}}" data-tier="{{.Tier}}"
+         data-name="{{.Name}}"
+         data-in="{{range $i, $x := .Inputs}}{{if $i}},{{end}}{{$x}}{{end}}"
+         data-out="{{range $i, $x := .Outputs}}{{if $i}},{{end}}{{$x}}{{end}}"
+         data-planets="{{range $i, $p := .Planets}}{{if $i}},{{end}}{{$p}}{{end}}"
+         title="{{.Name}}{{if .Cycle}} · цикл {{.Cycle}}с → {{.OutQty}} ед.{{end}}">
+      <img src="/icons/{{.TypeID}}" alt="" loading="lazy">
+      <span class="pinm">{{.Name}}</span>
+      <span class="piprice">{{if .Price}}{{iskshort .Price}}{{else}}—{{end}}</span>
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+</div>
+</div>
+
+<!-- ── calculator ── -->
+<div data-pipane="calc" hidden>
+  <div class="pihead">
+    <p class="stats" style="margin:0;">Выбери целевые товары и количество — покажу,
+      сколько нужно сырья и промежуточных материалов</p>
+  </div>
+
+  <div class="frow" style="margin:.5rem 0 .8rem;">
+    <input type="search" id="calcpick" list="calclist" placeholder="товар (например Broadcast Node)"
+           autocomplete="off" style="min-width:280px;">
+    <datalist id="calclist"></datalist>
+    <input type="number" id="calcqty" min="1" value="1" style="width:90px;">
+    <button type="button" id="calcadd">добавить</button>
+    <button type="button" id="calcreset" class="danger">очистить</button>
+  </div>
+
+  <div id="calctargets" class="calctargets"></div>
+  <div id="calcout"></div>
+</div>
+
+<!-- ── colony templates ── -->
+<div data-pipane="templates" {{if ne .Tab "templates"}}hidden{{end}}>
+  {{if .ImportErr}}<p class="err">{{.ImportErr}}</p>{{end}}
+  {{if .Msg}}<p class="stats" style="color:#5fd38d;">{{.Msg}}</p>{{end}}
+
+  <div class="card maxl" style="margin-top:.4rem;">
+    <h2 style="margin-top:0;">Добывающие планеты P0 → P1</h2>
+    <p class="muted" style="font-size:.78rem; margin:.2rem 0 .5rem;">
+      Космопорт и базовые фабрики со связями и маршрутами — по одному шаблону на каждую
+      из 15 переработок. Экстрактор не ставится: его размещение зависит от пятен ресурсов
+      на конкретной планете.</p>
+    <form method="post" action="/tools/planetary/refineries" class="frow">
+      <label class="muted" style="font-size:.78rem;">фабрик в шаблоне
+        <input type="number" name="count" value="13" min="1" max="30" style="width:70px;"></label>
+      <button type="submit">Создать все 15 шаблонов</button>
+    </form>
+  </div>
+
+  <div class="cols2" style="max-width:1300px; margin-top:.4rem;">
+    <div class="card" style="margin-top:0;">
+      <h2 style="margin-top:0;">Импорт из игры</h2>
+      <p class="muted" style="font-size:.78rem; margin:.2rem 0 .5rem;">
+        В клиенте: планетарный режим → «Экспортировать» → вставь JSON сюда.</p>
+      <form method="post" action="/tools/planetary/import">
+        <input type="text" name="name" placeholder="название (по умолчанию — комментарий из игры)"
+               style="width:100%; margin-bottom:.4rem;">
+        <textarea name="payload" rows="6" required placeholder='{"CmdCtrLv":5,"Cmt":"...","P":[...]}'
+                  style="width:100%; background:#0b0e14; border:1px solid #2a3a55; border-radius:6px;
+                         color:#e8eef7; padding:.4rem; font-size:.75rem; font-family:ui-monospace,Consolas,monospace;"></textarea>
+        <button type="submit" style="margin-top:.4rem;">Сохранить шаблон</button>
+      </form>
+    </div>
+
+    <div class="card" style="margin-top:0;">
+      <h2 style="margin-top:0;">Генератор завода</h2>
+      <p class="muted" style="font-size:.78rem; margin:.2rem 0 .5rem;">
+        Соберу раскладку «фабрики вокруг космопорта» под выбранный товар.</p>
+      <form method="post" action="/tools/planetary/generate" class="frow">
+        <input type="text" id="genpick" list="calclist" name="targetname"
+               placeholder="товар (например Gel-Matrix Biopaste)" style="min-width:240px;" required>
+        <input type="hidden" name="target" id="gentarget">
+        <select name="planet">
+          {{range .PlanetNames}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+        <label class="muted" style="font-size:.78rem;">линий
+          <input type="number" name="lines" value="1" min="1" max="8" style="width:60px;"></label>
+        <label class="muted" style="font-size:.78rem;">
+          <input type="checkbox" name="subs" value="1" checked> с фабриками входов</label>
+        <button type="submit">Сгенерировать</button>
+      </form>
+    </div>
+  </div>
+
+  <h2>Сохранённые шаблоны</h2>
+  {{if .Templates}}
+  {{range .Templates}}
+  <div class="card maxl pitpl">
+    <div class="frow" style="justify-content:space-between;">
+      <div style="min-width:0;">
+        <p style="margin:0; color:#e8eef7;">{{.Name}}</p>
+        <p class="muted" style="font-size:.75rem; margin:.15rem 0 0;">
+          {{if .PlanetName}}{{.PlanetName}} · {{end}}КЦ {{.CmdCtrLv}} ур. ·
+          структур {{.Pins}} · связей {{.Links}} · маршрутов {{.Routes}}
+          {{if .Product}} · итог: <b>{{.Product}}</b>{{end}}</p>
+      </div>
+      <div class="frow">
+        <button type="button" class="pitplcopy" data-payload="{{.Payload}}">Копировать JSON</button>
+        <form method="post" action="/tools/planetary/delete"
+              onsubmit="return confirm('Удалить шаблон «{{.Name}}»?')">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button class="danger" type="submit">Удалить</button>
+        </form>
+      </div>
+    </div>
+    {{if .Err}}<p class="err" style="margin:.4rem 0 0;">{{.Err}}</p>{{end}}
+    {{if .Factories}}
+    <p class="muted" style="font-size:.75rem; margin:.5rem 0 .2rem;">Производство:</p>
+    <div class="frow">
+      {{range .Factories}}
+      <span class="calcchip">{{item .TypeID .Name}}<b>×{{.Count}}</b>
+        <span class="muted">{{.Tier}}</span></span>
+      {{end}}
+    </div>
+    {{end}}
+    {{if .Imports}}
+    <p class="muted" style="font-size:.75rem; margin:.5rem 0 .2rem;">
+      Завозить: {{range $i, $n := .Imports}}{{if $i}}, {{end}}{{$n}}{{end}}</p>
+    {{end}}
+  </div>
+  {{end}}
+  {{else}}
+  <p class="muted">Шаблонов пока нет — импортируй из игры или сгенерируй.</p>
+  {{end}}
+</div>
+{{end}}

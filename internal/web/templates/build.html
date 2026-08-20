@@ -1,0 +1,365 @@
+{{define "content"}}
+<h1>Расчёт производства</h1>
+
+{{if .NoSDE}}
+<div class="card">
+  <p class="klabel">Нет статической базы</p>
+  <p class="knote muted">Чертежи и их материалы лежат в sde.db. Собери базу:
+    <code>.\sdeimport.exe -db sde.db</code> — без неё считать нечего.</p>
+</div>
+{{else}}
+
+{{/* Search is its own form: the settings form below auto-submits on every
+     change, and a search box that fires on blur would be unusable. */}}
+<form class="card bsearch" method="get" action="/tools/build">
+  <input type="hidden" name="runs" value="{{.Runs}}">
+  <input type="hidden" name="me" value="{{.ME}}">
+  <input type="hidden" name="te" value="{{.TE}}">
+  <input type="hidden" name="p" value="{{.Stat}}">
+  <input type="hidden" name="ch" value="{{index .Q "ch"}}">
+  <label class="ofield" style="flex:1;">
+    <span class="klabel">Что производим</span>
+    <input type="text" name="q" value="{{.Query}}" autocomplete="off"
+           placeholder="название чертежа или предмета — Rifter, топливный блок, Nanite Repair Paste">
+  </label>
+  <button class="tog on" type="submit">Искать</button>
+</form>
+
+{{if .Hits}}
+<div class="card bhits">
+  <p class="klabel">{{if .Rec}}Другие совпадения{{else}}Нашлось{{end}}
+    <span class="muted">[{{len .Hits}}]</span></p>
+  <div class="frow bhitrow">
+    {{range .Hits}}
+    <a class="tog{{if and $.Rec (eq .BlueprintID $.Rec.BlueprintID)}} on{{end}}"
+       href="{{qs $.Q "bp" (printf "%d" .BlueprintID) "q" ""}}"
+       title="{{.BlueprintName}}{{if eq .Activity "reaction"}} · реакция{{end}}">{{.ProductName}}</a>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{if .Err}}<p class="err">{{.Err}}</p>{{end}}
+
+{{if .Rec}}
+{{$isReaction := eq .Rec.Activity "reaction"}}
+
+<div class="card">
+  <div class="frow bhead">
+    <img class="bpic" src="/icons/{{.Rec.BlueprintID}}" alt="">
+    <div style="min-width:0;">
+      <p class="klabel" style="margin:0;">{{.Rec.BlueprintName}}</p>
+      <p class="kval" style="margin-top:.25rem;">{{item .Rec.ProductID .Rec.ProductName}}
+        <span class="muted" style="font-size:.8rem;">× {{num .Units}} шт.</span></p>
+      <p class="knote muted" style="margin-top:.2rem;">
+        {{if $isReaction}}реакция{{else}}производство{{end}} · {{num .Rec.ProductQty}} шт. за прогон
+        · цикл {{dur .JobTime}}{{if .SkillChar}} с навыками {{.SkillChar}}{{end}}</p>
+    </div>
+  </div>
+
+  <form class="oreset bgrid" method="get" action="/tools/build">
+    <input type="hidden" name="bp" value="{{.Rec.BlueprintID}}">
+    <input type="hidden" name="q" value="{{.Query}}">
+    <label class="ofield">
+      <span class="klabel">Прогонов</span>
+      <input type="text" name="runs" value="{{.Runs}}" inputmode="numeric">
+      <span class="knote muted">{{if .Rec.MaxRuns}}копия несёт до {{num .Rec.MaxRuns}} прогонов
+        {{- else}}число прогонов не ограничено{{end}}</span>
+    </label>
+    <label class="ofield">
+      <span class="klabel">ME, %</span>
+      <input type="text" name="me" value="{{.ME}}" inputmode="numeric"{{if $isReaction}} disabled{{end}}>
+      <span class="knote muted">{{if $isReaction}}у реакций ME чертежа нет{{else}}экономия материалов, 0…10{{end}}</span>
+    </label>
+    <label class="ofield">
+      <span class="klabel">TE, %</span>
+      <input type="text" name="te" value="{{.TE}}" inputmode="numeric"{{if $isReaction}} disabled{{end}}>
+      <span class="knote muted">{{if $isReaction}}и TE тоже{{else}}экономия времени, 0…20{{end}}</span>
+    </label>
+    <label class="ofield">
+      <span class="klabel">Цена материалов</span>
+      <select name="p">
+        {{range .Stats}}<option value="{{.Key}}"{{if eq .Key $.Stat}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+      <span class="knote muted">Жита, The Forge · живой ордербук</span>
+    </label>
+    <label class="ofield">
+      <span class="klabel">Комплектующие</span>
+      <select name="m">
+        {{range .Modes}}<option value="{{.Key}}"{{if eq .Key $.Mode}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+      <span class="knote muted">{{range .Modes}}{{if eq .Key $.Mode}}{{.Note}}{{end}}{{end}}</span>
+    </label>
+    <label class="ofield">
+      <span class="klabel">ME компонентов, %</span>
+      <input type="text" name="cme" value="{{.CompME}}" inputmode="numeric">
+      <span class="knote muted">один на все дочерние чертежи</span>
+    </label>
+    <label class="ofield">
+      <span class="klabel">Навыки времени</span>
+      <select name="ch">
+        <option value="0">без навыков</option>
+        {{range .Groups}}{{range .Chars}}
+        <option value="{{.ID}}"{{if eq .ID $.CharID}} selected{{end}}>{{.Name}}</option>
+        {{end}}{{end}}
+      </select>
+      <span class="knote muted">Industry и Advanced Industry — только на срок</span>
+    </label>
+  </form>
+
+  {{if .Owned}}
+  <div class="bowned">
+    <span class="klabel">Свои чертежи:</span>
+    {{range .Owned}}
+    <a class="tog{{if and (eq .ME $.ME) (eq .TE $.TE)}} on{{end}}"
+       href="{{qs $.Q "me" (printf "%d" .ME) "te" (printf "%d" .TE)}}"
+       title="{{if .IsCopy}}копия{{if gt .Runs 0}}, осталось {{num .Runs}} прогонов{{end}}{{else}}оригинал{{end}}">
+      {{.CharName}} · ME {{.ME}} / TE {{.TE}}{{if .IsCopy}} <i class="muted">копия</i>{{end}}</a>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+
+{{/* The verdict tiles: cost first, market second — the page answers
+     "what does it cost", the profit is the by-product. */}}
+<div class="card phead">
+  <div class="pheadstats">
+    <div class="pstat">
+      <p class="klabel">Себестоимость</p>
+      <p class="kval isk">{{isk .Total}}</p>
+      <p class="knote muted">закупка {{iskshort .BuyCost}} + работы {{iskshort (sumf .JobFee .SubFee)}}
+        {{- if .SubJobs}} · сборок {{add 1 .MadeCount}}{{end}}</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">За единицу</p>
+      <p class="kval isk">{{unitprice .PerUnit}}</p>
+      <p class="knote muted">{{num .Units}} шт. на выходе</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Рынок за единицу</p>
+      <p class="kval isk">{{if .HasProdPrice}}{{unitprice .SellPrice}}{{else}}—{{end}}</p>
+      <p class="knote muted">{{if .HasProdPrice}}селл 98-й · скупка {{unitprice .BuyPrice}}
+        {{- else if .Stale}}ордербук ещё грузится{{else}}в Жите этим не торгуют{{end}}</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Прибыль ордером</p>
+      <p class="kval {{if .HasProdPrice}}{{if gt .Profit 0.0}}pos{{else}}neg{{end}}{{end}}">
+        {{- if .HasProdPrice}}{{isk .Profit}}{{else}}—{{end}}</p>
+      <p class="knote muted">за вычетом сборов {{printf "%.2f" (sumf .Set.Broker .Set.Sales)}} %</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Маржа</p>
+      <p class="kval {{if .HasProdPrice}}{{if gt .Margin 0.0}}pos{{else}}neg{{end}}{{end}}">
+        {{- if .HasProdPrice}}{{pct .Margin}}{{else}}—{{end}}</p>
+      <p class="knote muted">{{if .HasProdPrice}}в скупку — {{isk .ProfitBuy}}
+        {{- else}}сравнить не с чем{{end}}</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">{{if .HasProdPrice}}ISK в час{{else}}Работа идёт{{end}}</p>
+      <p class="kval {{if .HasProdPrice}}{{if gt .ISKPerHour 0.0}}pos{{else}}neg{{end}}{{end}}">
+        {{- if .HasProdPrice}}{{iskshort .ISKPerHour}}{{else}}{{dur .JobTime}}{{end}}</p>
+      <p class="knote muted">{{if .HasProdPrice}}всего работ {{dur .TotalTime}}
+        {{- if .SubJobs}}, финальная {{dur .JobTime}}{{end}}
+        {{- else}}{{num .Units}} шт. на выходе{{end}}</p>
+    </div>
+  </div>
+</div>
+
+<div class="card otabwrap">
+  <table class="btab">
+    <thead>
+      <tr>
+        <th>Материал</th>
+        <th class="r">За прогон</th>
+        <th class="r">Нужно всего</th>
+        <th class="r">Цена за ед.</th>
+        <th class="r">Стоимость</th>
+        <th class="r">Доля</th>
+        <th class="r">Объём</th>
+        <th>Сделать или купить</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}
+      <tr class="{{if .Made}}bmade{{end}}{{if gt .Depth 1}} bsub{{end}}">
+        <td class="ell" style="padding-left:{{indent .Depth}}px">
+          {{- if gt .Depth 1}}<i class="btree">└</i> {{end}}{{item .TypeID .Name}}
+          <i class="muted bgrp">{{.Group}}</i></td>
+        <td class="r muted">{{num .Base}}</td>
+        <td class="r">{{num .Need}}
+          {{- if and .Made .Surplus}} <i class="bsurp" title="прогоны целые: делается {{num .Output}}, лишнее остаётся на складе">+{{num .Surplus}}</i>{{end}}</td>
+        <td class="r isk">{{if .Made}}<span title="себестоимость сборки за единицу">{{unitprice .UnitCost}}</span>
+          {{- else if .HasPrice}}{{unitprice .Price}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="r isk">{{if or .Made .HasPrice}}{{iskraw .Cost}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="r">
+          <span class="bshare"><i style="width:{{printf "%.2f" .Share}}%"></i></span>
+          <b>{{printf "%.1f" .Share}} %</b>
+        </td>
+        <td class="r muted">{{if .Made}}<span title="объём считается по тому, что реально покупается — по его сырью">—</span>
+          {{- else if .NoVolume}}<span title="в SDE у корпусов лежит только объём в собранном виде">—</span>
+          {{- else}}{{qty .Volume}} м³{{end}}</td>
+        <td class="bdec">
+          {{if .CanMake}}
+          {{/* the button shows the CURRENT decision, the number next to it
+               how much building would change the cost — negative = cheaper */}}
+          <a class="tog{{if .Made}} on{{end}}" href="{{.Toggle}}"
+             title="{{if .Made}}делаем сами: {{num .Runs}} прогонов, {{num .Jobs}} работ — нажми, чтобы покупать{{else}}покупаем готовым — нажми, чтобы делать самому{{end}}">
+            {{if .Made}}делаем{{else}}покупаем{{end}}</a>
+          {{if .HasDelta}}<b class="{{if lt .Delta 0.0}}pos{{else}}neg{{end}}"
+             title="сборка против покупки: {{if lt .Delta 0.0}}делать дешевле{{else}}покупать дешевле{{end}}">{{pct .Delta}}</b>{{end}}
+          {{else}}<span class="muted">—</span>{{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td><b>Материалы</b>{{if .MadeCount}} <span class="muted">· своих сборок: {{.MadeCount}}</span>{{end}}</td>
+        <td class="r"></td>
+        <td class="r"></td>
+        <td class="r"></td>
+        <td class="r isk"><b>{{iskraw .MatCost}}</b></td>
+        <td class="r"></td>
+        <td class="r muted">{{m3 .MatVolume}} м³{{if .HullLines}} <i class="sev-warn" title="корпуса в сумму объёма не вошли">+ корпуса</i>{{end}}</td>
+        <td></td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+
+{{if .Missing}}
+<p class="err">Цены нет у {{.Missing}} материалов — итог занижен.
+  {{if .Stale}}Ордербук ещё грузится, страница обновится сама.{{else}}Обычно это значит,
+  что в Жите этим просто не торгуют.{{end}}</p>
+{{end}}
+
+<div class="cols2">
+  <div class="card">
+    <p class="klabel">Стоимость установки работы</p>
+    <table class="bkv">
+      <tr><td>Оценочная стоимость материалов (EIV)</td><td class="r isk">{{iskraw .EIV}}</td></tr>
+      <tr><td>Индекс системы{{if .Set.System}} · {{.Set.System}}{{else}} <span class="sev-warn">· система не задана</span>{{end}}</td>
+          <td class="r">{{printf "%.2f" .Index}} %</td></tr>
+      <tr><td>Налог структуры</td><td class="r">{{printf "%.2f" .Set.Tax}} %</td></tr>
+      <tr><td>Сбор SCC</td><td class="r">{{printf "%.2f" .SCC}} %</td></tr>
+      <tr class="btot"><td><b>Сбор за финальную работу</b> <span class="muted">{{printf "%.2f" .FeeRate}} % от EIV</span></td>
+          <td class="r isk"><b>{{iskraw .JobFee}}</b></td></tr>
+      {{if .SubJobs}}
+      <tr><td>Сборы за компоненты <span class="muted">{{.SubJobs}} работ, уже внутри их себестоимости</span></td>
+          <td class="r isk">{{iskraw .SubFee}}</td></tr>
+      <tr class="btot"><td><b>Все сборы вместе</b></td>
+          <td class="r isk"><b>{{iskraw (sumf .JobFee .SubFee)}}</b></td></tr>
+      <tr><td>Время работ по компонентам <span class="muted">если гнать их по очереди</span></td>
+          <td class="r">{{dur .SubTime}}</td></tr>
+      {{end}}
+    </table>
+    {{if .IndexErr}}<p class="err" style="margin-top:.6rem;">{{.IndexErr}}</p>{{end}}
+    <p class="knote muted" style="margin-top:.6rem;">EIV считается по БАЗОВЫМ количествам
+      материалов (без ME) в ценах <code>adjusted_price</code> — ME режет расход, но не сбор.</p>
+  </div>
+
+  <div class="card">
+    <p class="klabel">Продажа в Жите</p>
+    {{if not .HasProdPrice}}
+    <p class="knote muted" style="margin-top:.5rem;">{{if .Stale}}Ордербук {{.Rec.ProductName}}
+      ещё не загружен — страница обновится сама через секунду.{{else}}Ордеров на
+      {{.Rec.ProductName}} в Жите нет: продавать это придётся где-то ещё, и сравнивать
+      себестоимость не с чем.{{end}}</p>
+    {{else}}
+    <table class="bkv">
+      <tr><td>Выставить ордером ({{num .Units}} × {{unitprice .SellPrice}})</td>
+          <td class="r isk">{{iskraw (mulf .SellPrice (float .Units))}}</td></tr>
+      <tr><td>− брокер {{printf "%.2f" .Set.Broker}} % и налог {{printf "%.2f" .Set.Sales}} %</td>
+          <td class="r isk">{{iskraw .RevenueOrder}}</td></tr>
+      <tr class="btot"><td><b>Прибыль ордером</b></td>
+          <td class="r isk"><b class="{{if gt .Profit 0.0}}pos{{else}}neg{{end}}">{{iskraw .Profit}}</b></td></tr>
+      <tr><td>Слить в скупку ({{unitprice .BuyPrice}} за ед.)</td>
+          <td class="r isk">{{iskraw .RevenueBuy}}</td></tr>
+      <tr class="btot"><td><b>Прибыль в скупку</b></td>
+          <td class="r isk"><b class="{{if gt .ProfitBuy 0.0}}pos{{else}}neg{{end}}">{{iskraw .ProfitBuy}}</b></td></tr>
+    </table>
+    {{end}}
+    <p class="knote muted" style="margin-top:.6rem;">Завезти на сборку надо
+      {{m3 .MatVolume}} м³ материалов — это и есть логистика этой партии. Объём готового
+      в SDE лежит только НЕупакованный, поэтому он тут не считается.</p>
+  </div>
+</div>
+
+{{/* Where and at what fees: a standing answer, saved in app_settings, so
+     it survives the next blueprint and the next visit. */}}
+<form class="card oreset" method="get" action="/tools/build">
+  <input type="hidden" name="bp" value="{{.Rec.BlueprintID}}">
+  <input type="hidden" name="q" value="{{.Query}}">
+  <input type="hidden" name="runs" value="{{.Runs}}">
+  <input type="hidden" name="me" value="{{.ME}}">
+  <input type="hidden" name="te" value="{{.TE}}">
+  <input type="hidden" name="p" value="{{.Stat}}">
+  <input type="hidden" name="ch" value="{{index .Q "ch"}}">
+  <p class="klabel">Где строим и что берут сверху</p>
+  <div class="oregrid" style="margin-top:.6rem;">
+    <label class="ofield">
+      <span class="klabel">Система</span>
+      <input type="text" name="sys" value="{{.Set.System}}" placeholder="где стоит структура">
+      <span class="knote muted">индекс тянется из ESI; пусто — не учитывается</span>
+    </label>
+    <label class="ofield">
+      <span class="klabel">Структура</span>
+      <select name="struct">
+        {{range .Structs}}<option value="{{.Key}}"{{if eq .Key $.Set.Struct}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+      <span class="knote muted">
+        {{if eq .Struct.Key "npc"}}бонусов нет
+        {{- else}}материалы ×{{.Struct.Mat}}, время ×{{if .Rec.IsReaction}}{{.Struct.RTime}}{{else}}{{.Struct.Time}}{{end}}{{end}}</span>
+    </label>
+    <label class="ofield">
+      <span class="klabel">Налог структуры, %</span>
+      <input type="text" name="tax" value="{{printf "%.2f" .Set.Tax}}" inputmode="decimal">
+      <span class="knote muted">у НПС-станции 0.25</span>
+    </label>
+    <label class="ofield">
+      <span class="klabel">Брокерский сбор, %</span>
+      <input type="text" name="broker" value="{{printf "%.2f" .Set.Broker}}" inputmode="decimal">
+      <span class="knote muted">только при продаже ордером</span>
+    </label>
+    <label class="ofield">
+      <span class="klabel">Налог с продажи, %</span>
+      <input type="text" name="sales" value="{{printf "%.2f" .Set.Sales}}" inputmode="decimal">
+      <span class="knote muted">снижается навыком Accounting</span>
+    </label>
+  </div>
+  <noscript><button type="submit" class="tog on" style="margin-top:.6rem;">применить</button></noscript>
+</form>
+
+{{if .Capped}}
+<p class="err">Дерево компонентов упёрлось в ограничение размера — глубокие ветки
+  посчитаны как покупка. Уменьши прогоны или собирай компоненты отдельными расчётами.</p>
+{{end}}
+
+<p class="knote muted">В колонке «сделать или купить» кнопка показывает текущее решение,
+  а число рядом — насколько сборка отличается от покупки: <b class="pos">зелёное со знаком
+  минус</b> значит «делать дешевле на столько». Сравнивается цена готового в Жите с полной
+  себестоимостью сборки: сырьё компонента (тоже по своему решению, рекурсивно) плюс отдельный
+  сбор за его работу. Клик фиксирует решение по этому компоненту, и оно попадает в ссылку —
+  режим «считать выгоду» лишь расставляет решения по умолчанию. <b>Прогоны целые</b>: если нужно 14 единиц, а чертёж делает по 100, платишь за
+  100 — излишек показан зелёным «+86» и учтён в сравнении. Дерево раскрывается на
+  {{if eq .Mode "buy"}}один уровень (в режиме «покупать всё» глубже смотреть незачем){{else}}четыре уровня{{end}},
+  вручную отмеченный компонент раскрывается и глубже.</p>
+
+<p class="knote muted">Расход материалов —
+  <code>max(прогоны, ceil(база × прогоны × (1 − ME/100)))</code>; у реакций ME и TE чертежа
+  не действуют вовсе, там материалы двигают только риги структуры. Бонус корпуса структуры
+  на материалы применяется ОТДЕЛЬНЫМ множителем после ME, округление одно и в самом конце —
+  сверено с клиентом до единицы на всех девяти материалах топливного блока. Риги структуры
+  (ещё −2…2.4 % материалов и −20…24 % времени по группам предметов) не учитываются.
+  Сам чертёж в себестоимость не входит: у T1 это разовая покупка BPO, у T2 — копия из
+  инвента, и обе считаются отдельно.</p>
+{{else}}
+<div class="card">
+  <p class="klabel">Выбери, что считаем</p>
+  <p class="knote muted">Введи название предмета или чертежа — русское или английское.
+    Инструмент берёт список материалов из sde.db, цены — из живого ордербука Житы,
+    и говорит, во сколько обойдётся сборка, если всё купить готовым.</p>
+</div>
+{{end}}
+{{end}}
+{{end}}

@@ -1,0 +1,277 @@
+{{define "content"}}
+<h1>Таблица руд</h1>
+<nav class="tabs">
+  {{range .Kinds}}
+  <a href="{{qs $.Q "t" .Key "s" "" "d" "" "a" ""}}"{{if eq .Key $.Kind}} class="active"{{end}}>{{.Label}}</a>
+  {{end}}
+  <a href="/tools/market">Товары</a>
+  <a href="/tools/orders">Ордера</a>
+</nav>
+
+{{if .NoSDE}}
+<div class="card">
+  <p class="klabel">Нет статической базы</p>
+  <p class="knote muted">Состав руд лежит в sde.db (таблица <b>type_materials</b>). Собери базу
+    заново: <code>.\sdeimport.exe -db sde.db -redata</code> — без неё считать нечего.</p>
+</div>
+{{else}}
+
+<form class="card oreset" method="get" action="/tools/ore">
+  <input type="hidden" name="t" value="{{.Kind}}">
+  <input type="hidden" name="s" value="{{.Sort}}">
+  <input type="hidden" name="d" value="{{.Desc}}">
+  <input type="hidden" name="v" value="{{if .ShowVariants}}1{{else}}0{{end}}">
+  <input type="hidden" name="c" value="{{if .ShowComp}}1{{else}}0{{end}}">
+  <input type="hidden" name="b" value="{{if .ShowBatch}}1{{else}}0{{end}}">
+  <input type="hidden" name="f" value="{{if .ShowFound}}1{{else}}0{{end}}">
+  {{/* the setting the visible field is not showing right now still has to
+       survive the round trip, or switching back resets it */}}
+  {{if .Refinery}}<input type="hidden" name="y" value="{{.Yield}}">{{end}}
+  <div class="oregrid">
+    {{if ne .Kind "gas"}}
+    <label class="ofield">
+      <span class="klabel">Количество</span>
+      <input type="text" name="a" value="{{.Amount}}" inputmode="decimal">
+      <span class="knote muted">{{.AmountUnit}}, можно с суффиксом k/m</span>
+    </label>
+    <div class="ofield">
+      <span class="klabel">Переработка</span>
+      <a class="tog{{if .Refinery}} on{{end}}" data-refopen>
+        {{if .Refinery}}{{.Refinery.CharName}} · {{.SetWhere}}{{else}}настроить…{{end}}</a>
+      <span class="knote muted">
+        {{if .Refinery}}база {{.SetBase}} %, дальше навыки альта{{else}}кто и где перерабатывает{{end}}</span>
+    </div>
+    {{if not .Refinery}}
+    <label class="ofield">
+      <span class="klabel">Выход переработки</span>
+      <input type="text" name="y" value="{{.Yield}}" inputmode="decimal">
+      <span class="knote muted">процент или доля (≤1)</span>
+    </label>
+    {{end}}
+    {{end}}
+    <label class="ofield">
+      <span class="klabel">Цена</span>
+      <select name="p">
+        {{range .Stats}}<option value="{{.Key}}"{{if eq .Key $.Stat}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+      <span class="knote muted">Жита, The Forge · перцентили взвешены объёмом ордеров</span>
+    </label>
+    <div class="ofield">
+      <span class="klabel">Показывать</span>
+      <div class="frow otoggles">
+        <a class="tog{{if .ShowVariants}} on{{end}}" href="{{if .ShowVariants}}{{qs .Q "v" "0"}}{{else}}{{qs .Q "v" "1"}}{{end}}">сорта</a>
+        <a class="tog{{if .ShowComp}} on{{end}}" href="{{if .ShowComp}}{{qs .Q "c" "0"}}{{else}}{{qs .Q "c" "1"}}{{end}}">компресс</a>
+        {{if eq .Kind "ore"}}
+        <a class="tog{{if .ShowBatch}} on{{end}}" href="{{if .ShowBatch}}{{qs .Q "b" "0"}}{{else}}{{qs .Q "b" "1"}}{{end}}">пакетный</a>
+        {{end}}
+        <a class="tog{{if .ShowFound}} on{{end}}" href="{{if .ShowFound}}{{qs .Q "f" "0"}}{{else}}{{qs .Q "f" "1"}}{{end}}">где копать</a>
+      </div>
+    </div>
+  </div>
+  <noscript><button type="submit" class="tog on" style="margin-top:.6rem;">применить</button></noscript>
+</form>
+
+{{/* Reprocessing settings window. The base rate is recomputed live in
+     the browser from the same SDE numbers the server used, so the effect
+     of a rig or a move to nullsec is visible before saving. */}}
+<div class="overlay" id="refwin">
+  <div class="modal">
+    <h3>Настройки переработки · {{.KindLabel}}</h3>
+    <p class="knote muted" style="margin:-.4rem 0 .9rem;">Правится набор для этой вкладки.
+      Выход игра по видам не различает — база одна и та же, — но возят их в разные места,
+      поэтому у льда и лунной руды свои настройки.</p>
+    <form class="refset" method="post" action="/tools/ore/refinery"
+          data-station="{{.Model.StationBase}}">
+      <input type="hidden" name="back" value="{{.BackURL}}">
+      <input type="hidden" name="kind" value="{{.Kind}}">
+      <div class="refgrid">
+        <label class="ofield">
+          <span class="klabel">Перерабатывает</span>
+          <select name="ch">
+            <option value="0">вручную (свой процент)</option>
+            {{range .Chars}}
+            <option value="{{.ID}}"{{if eq (printf "%d" .ID) $.SetCharID}} selected{{end}}>{{.Name}}</option>
+            {{end}}
+          </select>
+          <span class="knote muted">навыки альта вместо ручного выхода</span>
+        </label>
+        <label class="ofield">
+          <span class="klabel">Где</span>
+          <select name="struct">
+            {{range .Model.Structures}}
+            <option value="{{.Key}}" data-bonus="{{.Bonus}}" data-rigs="{{if .Rigs}}1{{else}}0{{end}}"
+              {{- if eq .Key $.Set.Struct}} selected{{end}}>{{.Name}}{{if .Bonus}} (+{{.Bonus}} %){{end}}</option>
+            {{end}}
+          </select>
+          <span class="knote muted">у НПС-станции всегда {{.SetBase}} % без вариантов</span>
+        </label>
+        <label class="ofield">
+          <span class="klabel">Риг переработки</span>
+          <select name="rig">
+            {{range .Model.Rigs}}
+            <option value="{{.Key}}" data-yield="{{.Yield}}"
+                    data-hi="{{index .Sec "hi"}}" data-low="{{index .Sec "low"}}" data-null="{{index .Sec "null"}}"
+              {{- if eq .Key $.Set.Rig}} selected{{end}}>{{.Name}}</option>
+            {{end}}
+          </select>
+          <span class="knote muted">риг ставится только в структуру</span>
+        </label>
+        <label class="ofield">
+          <span class="klabel">Пространство</span>
+          <select name="sec">
+            {{range .Model.Secs}}
+            <option value="{{.Key}}"{{if eq .Key $.Set.Sec}} selected{{end}}>{{.Name}}</option>
+            {{end}}
+          </select>
+          <span class="knote muted">множитель применяется к бонусу РИГА</span>
+        </label>
+      </div>
+      <p class="knote" style="margin-top:.9rem;">База переработки: <b id="refbase">{{.SetBase}} %</b>
+        <span class="muted">— это ставка ДО навыков; навыки и импланты альта умножаются на неё
+          по каждой руде отдельно.</span></p>
+
+      <label class="refall">
+        <input type="checkbox" name="all" value="1"{{if .SameSetup}} checked{{end}}>
+        <span>применить ко всем видам сразу</span>
+      </label>
+      {{if .OtherSetups}}
+      <p class="knote muted">Сейчас у остальных: {{range $i, $o := .OtherSetups}}{{if $i}} · {{end}}{{$o}}{{end}}</p>
+      {{end}}
+
+      <div class="mrow">
+        <button class="tog on" type="submit">Сохранить</button>
+        <a class="tog" data-refclose>Отмена</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+{{if .CharErr}}<p class="err">{{.CharErr}}</p>{{end}}
+
+{{if .Refinery}}
+<p class="knote muted">Выход считается по каждой руде отдельно: общие навыки одни на всё,
+  а профильный — свой у каждого семейства, поэтому «Simple Ore Processing V» ничего не даёт
+  на арконоре. Наведи на число в колонке «Выход» — там разложение.</p>
+{{end}}
+
+{{if not .Rows}}
+<div class="card"><p class="klabel">Пусто</p>
+  <p class="knote muted">Ни одного типа этого вида в базе не нашлось.</p></div>
+{{else}}
+
+<div class="card otabwrap">
+<table class="oretab">
+  <thead>
+    <tr>
+      <th class="onm">
+        <a class="shd" href="{{qs .Q "s" "name" "d" (ifsort .Sort .Desc "name")}}">
+          {{if eq .Kind "gas"}}Газ
+          {{- else}}{{if eq .Kind "ice"}}Продукты{{else}}Содержимое{{end}} в {{.Amount}} {{.AmountUnit}}
+            {{- if .Refinery}} · выход {{.Refinery.CharName}}{{else}} при {{.Yield}} %{{end}}{{end}}</a>
+      </th>
+      {{if ne .Kind "gas"}}<th class="ogrd">Сорт</th>{{end}}
+      {{if and .Refinery (ne .Kind "gas")}}<th class="r">Выход</th>{{end}}
+
+      {{if eq .Kind "moon"}}
+        {{range .MoonTiers}}<th>{{.}}</th>{{end}}
+      {{else if ne .Kind "gas"}}
+        {{range .Cols}}
+        <th class="r ocol">
+          <a class="shd" href="{{qs $.Q "s" (printf "m%d" .TypeID) "d" (ifsort $.Sort $.Desc (printf "m%d" .TypeID))}}">{{.Short}}</a>
+          <span class="isk">{{unitprice .Price}}</span>
+        </th>
+        {{end}}
+        {{if .HasRare}}<th>Прочее</th>{{end}}
+      {{end}}
+
+      {{if ne .Kind "gas"}}
+      <th class="r">
+        <a class="shd" href="{{qs .Q "s" "refined" "d" (ifsort .Sort .Desc "refined")}}">Стоимость минералов</a>
+      </th>
+      {{end}}
+      <th class="r">
+        <a class="shd" href="{{qs .Q "s" "raw" "d" (ifsort .Sort .Desc "raw")}}">Цена сырой <span class="muted">/ за м³</span></a>
+      </th>
+      {{if .ShowComp}}<th class="r">Компресснутая <span class="muted">/ за м³</span></th>{{end}}
+      {{if and .ShowBatch (eq .Kind "ore")}}<th class="r">Пакетная</th>{{end}}
+      {{if .ShowFound}}<th>Где копать</th>{{end}}
+    </tr>
+  </thead>
+  <tbody>
+    {{range $r := .Rows}}
+    {{$vars := $r.Variants}}{{if not $.ShowVariants}}{{$vars = slice $r.Variants 0 1}}{{end}}
+    {{$n := len $vars}}
+    {{range $i, $v := $vars}}
+    <tr{{if not $i}} class="otop"{{end}}>
+      {{if not $i}}
+      <td class="onm" rowspan="{{$n}}">
+        {{item $r.BaseID $r.Name}} <i class="ovol">{{volstr $r.Volume}}</i>
+        {{if $v.Erratic}}<i class="oerr" title="в SDE у этой руды не точный состав, а диапазон — показана середина">случайный состав</i>{{end}}
+      </td>
+      {{end}}
+
+      {{if ne $.Kind "gas"}}
+      <td class="ogrd">{{if $v.Label}}{{$v.Label}} <b>{{pct $v.Bonus}}</b>{{else}}<span class="muted">базовая</span>{{end}}</td>
+      {{if and $.Refinery (not $i)}}
+      <td class="r oyld" rowspan="{{$n}}" title="{{$r.YieldNote}}">{{printf "%.1f" (mulf $r.Yield 100)}} %</td>
+      {{end}}
+      {{end}}
+
+      {{if eq $.Kind "moon"}}
+        {{range $ti, $t := $.MoonTiers}}
+        {{$m := index $v.Tiers $ti}}
+        <td class="otier">{{if $m}}{{$m}}{{else}}<span class="muted">—</span>{{end}}</td>
+        {{end}}
+      {{else if ne $.Kind "gas"}}
+        {{range $ci, $c := $.Cols}}
+        <td class="r">{{qty (index $v.Mats $ci)}}</td>
+        {{end}}
+        {{if $.HasRare}}
+        <td class="otier">{{if $v.Other}}{{$v.Other}}{{else}}<span class="muted">—</span>{{end}}</td>
+        {{end}}
+      {{end}}
+
+      {{if ne $.Kind "gas"}}
+      <td class="r isk">{{unitprice $v.Refined}}</td>
+      {{end}}
+      <td class="r pcol">{{template "pricecell" $v.Raw}}</td>
+      {{if $.ShowComp}}
+      <td class="r pcol">{{template "pricecell" $v.Comp}}</td>
+      {{end}}
+      {{if and $.ShowBatch (eq $.Kind "ore")}}
+      <td class="r pcol">{{template "pricecell" $v.Batch}}</td>
+      {{end}}
+      {{if and $.ShowFound (not $i)}}
+      <td class="ofnd" rowspan="{{$n}}">{{range $r.Found}}<span class="fnd" title="{{.Title}}">{{.Label}}</span>{{end}}</td>
+      {{end}}
+    </tr>
+    {{end}}
+    {{end}}
+  </tbody>
+</table>
+</div>
+
+<p class="knote muted">Состав — из sde (<b>type_materials</b>), количества там даны на партию
+  переработки (<b>portion_size</b>), поэтому всё пересчитано на единицу и дальше на объём:
+  лазер режет кубометры, а не штуки, и сравнивать руду можно только за м³.
+  Цены — живой ордербук The Forge, {{.Priced}} типов из {{.Wanted}} получили цену.
+  {{if .StatIsBuy}}Выбрана цена скупки — это то, за сколько у тебя КУПЯТ.{{end}}
+  Процент рядом с ценой отвечает на один вопрос: выгоднее переработать или продать как есть.
+  Считается он на ЕДИНИЦУ товара — поэтому компресснутая и пакетная руда сравнимы напрямую:
+  единица <i>Compressed Veldspar</i> перерабатывается ровно в то же, что единица сырого,
+  а пакетная — в стократ больше.</p>
+{{end}}
+{{end}}
+{{end}}
+
+{{/* The per-m³ line is ALWAYS rendered, empty if there is nothing to put
+     in it: it is the second line of the cell, and a row that has it is
+     taller than a row that does not — that alone made the table wobble
+     from family to family. */}}
+{{define "pricecell"}}
+{{if .HasPrice}}
+  <span class="isk">{{unitprice .Price}}</span>
+  {{if .HasDelta}}<b class="{{if gt .Delta 0.0}}pos{{else}}neg{{end}}">{{pct .Delta}}</b>{{end}}
+  <i class="perm3">{{if .PerM3}}{{unitprice .PerM3}}/м³{{else}}&nbsp;{{end}}</i>
+{{else}}<span class="muted">—</span><i class="perm3">&nbsp;</i>{{end}}
+{{end}}
