@@ -58,5 +58,9 @@ $out.Add('/container print where name=eve-empire')
 $out.Add('/container start [find name=eve-empire]')
 
 New-Item -ItemType Directory -Force dist | Out-Null
-$out -join "`r`n" | Out-File -Encoding utf8 dist\ros-eve.rsc
+
+# Без BOM: RouterOS спотыкается о него в первой строке при /import.
+$text = ($out -join "`r`n") + "`r`n"
+$dest = Join-Path (Get-Location).Path 'dist\ros-eve.rsc'
+[System.IO.File]::WriteAllText($dest, $text, (New-Object System.Text.UTF8Encoding $false))
 Write-Host "готово: dist\ros-eve.rsc ($($out.Count) строк)"
