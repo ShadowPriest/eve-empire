@@ -1048,6 +1048,44 @@
   details.sgroup .gsp { color: #5f708c; font-size: .78rem; }
   .lvl { letter-spacing: .1em; color: #4da3ff; font-size: .78rem; }
 
+  /* привязка к аккаунту прямо в настройках */
+  .acctform { display: flex; align-items: center; gap: .4rem; margin-top: .5rem; }
+  .acctform .klabel { font-size: .75rem; }
+  .acctform input {
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #e8eef7; padding: .25rem .5rem; font: inherit; font-size: .8rem; width: 190px;
+  }
+
+  /* скорость обучения рядом с полосами прогресса */
+  .rate { font-style: normal; color: #7b8aa0; font-size: .72rem; white-space: nowrap; }
+  .skrow .rate { margin-left: .3rem; }
+  .skrow.inq .nm { color: #4da3ff; }
+  .qrow .tm .rate { display: block; }
+  .skcat .qn {
+    background: #1a2438; border: 1px solid #35507a; color: #4da3ff;
+    border-radius: 999px; padding: 0 .3rem; font-size: .66rem; margin-left: auto;
+  }
+
+  /* ── свёрнутый аккаунт: ряд портретов ───────────────────── */
+  .acct { cursor: pointer; user-select: none; display: flex; align-items: center; gap: .35rem; }
+  .acct .caret {
+    font-style: normal; width: 8px; flex: none; color: #5f708c; transition: transform .12s;
+  }
+  .acct .caret::before { content: "▾"; }
+  .group.collapsed .acct .caret { transform: rotate(-90deg); }
+  .acct .acnt { margin-left: auto; color: #55657d; font-size: .7rem; font-weight: 400; }
+  .acctrow { display: none; }
+  .group.collapsed .char { display: none; }
+  .group.collapsed .acctrow {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: .3rem; padding: .1rem .7rem .5rem;
+  }
+  .pslot { position: relative; display: block; aspect-ratio: 1; border-radius: 6px; overflow: hidden; }
+  .pslot img { width: 100%; height: 100%; display: block; object-fit: cover; opacity: .85; }
+  .pslot:hover img { opacity: 1; }
+  .pslot img.online { box-shadow: inset 0 0 0 2px #5fd38d; }
+  .pslot.empty { border: 1px dashed #26324a; background: #0b0e14; }
+  .pslot .mailbadge { top: 1px; right: 1px; }
+
   /* modal */
   .overlay {
     display: none; position: fixed; inset: 0; z-index: 50;
@@ -1384,7 +1422,8 @@
   }
 </style>
 </head>
-<body data-stale="{{if .Stale}}1{{end}}" data-errors="{{join .Errors}}">
+<body data-stale="{{if .Stale}}1{{end}}" data-errors="{{join .Errors}}"
+      data-section="{{.Section}}" data-charid="{{if .Selected}}{{.Selected.ID}}{{end}}">
   <script>if (localStorage.getItem('eeSidebar') === '1') document.body.classList.add('sc');</script>
   <header class="topbar">
     <div class="brand">
@@ -1465,7 +1504,23 @@
     <div class="charlist" id="charlist">
       {{range .Groups}}
       <div class="group" data-account="{{.Key}}">
-        <div class="acct" draggable="true">{{.Name}}</div>
+        <div class="acct" draggable="true" title="клик — свернуть аккаунт, перетаскивание — порядок">
+          <i class="caret"></i>{{.Name}}<span class="acnt">{{len .Chars}}</span>
+        </div>
+        {{/* Свёрнутый вид: ряд портретов по три — столько же, сколько
+             слотов у аккаунта в игре. Пустые слоты рисуем заглушками,
+             чтобы ряд не съезжал и было видно, что место свободно. */}}
+        <div class="acctrow">
+          {{range .Chars}}
+          <a class="pslot" data-id="{{.ID}}" href="/characters/{{.ID}}"
+             title="{{.Name}} · {{iskshort .Wallet}}">
+            <img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=64" alt=""
+                 class="{{if .Online}}online{{end}}">
+            {{if .UnreadMail}}<b class="mailbadge">{{if gt .UnreadMail 99}}99+{{else}}{{.UnreadMail}}{{end}}</b>{{end}}
+          </a>
+          {{end}}
+          {{range emptyslots (len .Chars)}}<span class="pslot empty" title="свободный слот аккаунта"></span>{{end}}
+        </div>
         {{range .Chars}}
         <a class="char{{if and $.Selected (eq $.Selected.ID .ID)}} sel{{end}}"
            draggable="true" data-id="{{.ID}}" data-tags="{{tagsattr .Tags}}"
@@ -1603,25 +1658,162 @@
   }
   applyErrors();
 
-  if (document.body.dataset.stale === '1') {
+
+  /* ── свёрнутые аккаунты ─────────────────────────────────────
+     Три десятка альтов в ленте по 62 px — это два экрана прокрутки.
+     Свёрнутый аккаунт занимает одну строку портретов; состояние живёт
+     в localStorage, поэтому переживает и переходы, и перезагрузку. */
+  const ACCT_KEY = 'acctCollapsed';
+  function collapsedAccounts() {
+    try { return new Set(JSON.parse(localStorage.getItem(ACCT_KEY) || '[]')); }
+    catch (e) { return new Set(); }
+  }
+  function applyAccounts() {
+    const set = collapsedAccounts();
+    list.querySelectorAll('.group').forEach(g =>
+      g.classList.toggle('collapsed', set.has(g.dataset.account)));
+  }
+  document.addEventListener('click', e => {
+    const head = e.target.closest('#charlist .acct');
+    if (!head) return;
+    const g = head.closest('.group');
+    const set = collapsedAccounts();
+    if (g.classList.toggle('collapsed')) set.add(g.dataset.account);
+    else set.delete(g.dataset.account);
+    localStorage.setItem(ACCT_KEY, JSON.stringify([...set]));
+  });
+  applyAccounts();
+
+  /* ── сайдбар живёт отдельно от центра ──────────────────────
+     Список персонажей одинаков на всех страницах. Перерисовывать его на
+     каждый переход — значит дёргать три десятка портретов, терять
+     прокрутку, выделение и свёрнутые аккаунты. Поэтому трогаем его,
+     только когда данные ДЕЙСТВИТЕЛЬНО изменились. */
+  function syncSidebar(doc) {
+    const fresh = doc.getElementById('charlist');
+    if (!fresh || fresh.innerHTML === list.innerHTML) return;
+    const top = list.scrollTop;
+    list.innerHTML = fresh.innerHTML;
+    list.scrollTop = top;
+    restoreSelection();
+    applyTagFilter();
+    applyAccounts();
+  }
+
+  /* Ссылки альтов ведут в ТЕКУЩИЙ раздел (открыты «Навыки» — у всех
+     ссылок «Навыки»), подсветка — на открытом персонаже. Раньше это
+     приезжало с сервера вместе с перерисовкой всего списка. */
+  function markSidebar() {
+    const sec = document.body.dataset.section || '';
+    const cur = document.body.dataset.charid || '';
+    list.querySelectorAll('.char').forEach(a => {
+      a.setAttribute('href', '/characters/' + a.dataset.id + (sec ? '/' + sec : ''));
+      a.classList.toggle('sel', a.dataset.id === cur);
+    });
+  }
+  markSidebar();
+
+  /* innerHTML не выполняет <script>, а на планетарке в нём приезжает
+     window.PI_RECIPES — пересоздаём теги руками. */
+  function runPageScripts(root) {
+    root.querySelectorAll('script').forEach(old => {
+      const s = document.createElement('script');
+      for (const a of old.attributes) s.setAttribute(a.name, a.value);
+      s.textContent = old.textContent;
+      old.replaceWith(s);
+    });
+  }
+
+  /* Общий хвост после любой смены центра. */
+  function afterMain() {
+    applyErrors();
+    initCountdowns();
+    initRings();
+    runPageScripts(document.getElementById('main'));
+    document.dispatchEvent(new CustomEvent('page:swap'));
+  }
+
+  /* Ревалидация протухшего кэша: та же страница, но со свежими данными. */
+  function revalidate() {
+    if (document.body.dataset.stale !== '1') return;
     setStatus('yellow');
-    fetch(location.href, {headers: {'X-Fresh': '1'}})
+    const url = location.href;
+    fetch(url, {headers: {'X-Fresh': '1'}})
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
       .then(html => {
+        if (location.href !== url) return;   // пока грузили, ушли на другую страницу
         const doc = new DOMParser().parseFromString(html, 'text/html');
         const fresh = doc.getElementById('main');
         if (fresh) document.getElementById('main').innerHTML = fresh.innerHTML;
-        const freshList = doc.getElementById('charlist');
-        if (freshList) list.innerHTML = freshList.innerHTML;
-        restoreSelection();
-        applyTagFilter();
+        syncSidebar(doc);
+        document.body.dataset.stale = '';
         document.body.dataset.errors = doc.body.dataset.errors || '';
-        applyErrors();
-        initCountdowns();
-        initRings();
+        afterMain();
       })
       .catch(e => setStatus('red', 'Не удалось обновить: ' + e.message));
   }
+  revalidate();
+
+  /* ── переходы: меняется только центр ───────────────────────
+     Ссылки остаются настоящими <a href="...">: без JS, в новой вкладке и
+     в поисковике всё работает как обычная многостраничная выдача. С JS
+     подменяется #main, а адрес правится через History API. */
+  const NO_SWAP = /^\/(login|callback|icons|api|logout)(\/|$)/;
+  function swapDoc(html, url) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const fresh = doc.getElementById('main');
+    if (!fresh) { location.assign(url); return; }
+    document.getElementById('main').innerHTML = fresh.innerHTML;
+    document.title = doc.title;
+    const to = document.body.dataset, from = doc.body.dataset;
+    to.stale = from.stale || '';
+    to.errors = from.errors || '';
+    to.section = from.section || '';
+    to.charid = from.charid || '';
+    markSidebar();
+    afterMain();
+    revalidate();
+  }
+  function navigate(url, push) {
+    setStatus('yellow');
+    fetch(url, {headers: {'X-Nav': '1'}})
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(html => {
+        if (push) history.pushState({nav: 1}, '', url);
+        swapDoc(html, url);
+        const main = document.getElementById('main');
+        if (main) main.scrollTop = 0;
+      })
+      .catch(() => location.assign(url));   // не смогли по-тихому — уходим честно
+  }
+
+  document.addEventListener('click', e => {
+    if (e.defaultPrevented || e.button !== 0) return;
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;   // ctrl+клик — выделение и новая вкладка
+    const a = e.target.closest('a[href]');
+    if (!a || a.target || a.hasAttribute('download') || a.dataset.nonav !== undefined) return;
+    const href = a.getAttribute('href');
+    if (!href || href.startsWith('#')) return;
+    const u = new URL(href, location.href);
+    if (u.origin !== location.origin || NO_SWAP.test(u.pathname)) return;
+    if (u.href === location.href) return;
+    e.preventDefault();
+    navigate(u.pathname + u.search, true);
+  });
+
+  /* GET-формы (настройки таблицы руд и т.п.) — тем же путём. */
+  document.addEventListener('submit', e => {
+    const f = e.target;
+    if (!(f instanceof HTMLFormElement)) return;
+    if ((f.method || 'get').toLowerCase() !== 'get' || f.dataset.nonav !== undefined) return;
+    const u = new URL(f.getAttribute('action') || location.pathname, location.href);
+    if (u.origin !== location.origin || NO_SWAP.test(u.pathname)) return;
+    e.preventDefault();
+    const q = new URLSearchParams(new FormData(f)).toString();
+    navigate(u.pathname + (q ? '?' + q : ''), true);
+  });
+
+  window.addEventListener('popstate', () => navigate(location.pathname + location.search, false));
 
   /* ── colony map: cycle progress rings ───────────────────── */
   const RING_LEN = 100.5; // 2πr for r=16
@@ -2366,7 +2558,7 @@
      revalidation and listeners bound to the form itself would die with it. */
   document.addEventListener('change', e => {
     const f = e.target.closest('form.oreset');
-    if (f) f.submit();
+    if (f) f.requestSubmit();
   });
 
   /* ── orders tool: market tree folds locally ──────────────────
@@ -2768,6 +2960,7 @@
     if (!f) return;
     document.querySelectorAll('.bpfilter').forEach(x => x.classList.toggle('active', x === f));
     applyBPFilter();
+    document.addEventListener("page:swap", applyBPFilter);
   });
   document.addEventListener('input', e => {
     if (e.target.id === 'bpsearch') applyBPFilter();
@@ -3008,6 +3201,7 @@
       if (box) box.checked = localStorage.getItem('eeFleetAuto') === '1';
     }
     syncAuto();
+    document.addEventListener("page:swap", syncAuto);
     setInterval(() => {
       const box = document.getElementById('flauto');
       if (!box || !box.checked) return;

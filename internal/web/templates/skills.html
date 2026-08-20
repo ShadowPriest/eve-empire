@@ -19,6 +19,7 @@
       <button type="button" class="skcat" data-group="g{{$i}}">
         <span class="ico">⬡</span>
         <span class="nm">{{.Name}}</span>
+        {{$q := index $.GroupQueued $i}}{{if $q}}<span class="qn" title="навыков этой группы в очереди обучения">{{$q}}</span>{{end}}
         <span class="cnt">{{len .Skills}}</span>
       </button>
       {{end}}
@@ -27,11 +28,11 @@
     <div class="sklist" id="sklist">
       {{range $i, $g := .Tree}}
       {{range .Skills}}
-      <div class="skrow{{if not .Known}} unknown{{end}}" data-group="g{{$i}}" data-name="{{.SkillName}}">
-        <span class="sq">{{$a := .ActiveLevel}}{{$t := .TrainedLevel}}{{$tr := and (eq .SkillID $.TrainSkill) .Known}}{{range $l := seq 5}}<i class="{{if and $tr (eq $l $.TrainLvl)}}tr{{else if le $l $a}}on{{else if le $l $t}}dim{{end}}"></i>{{end}}</span>
+      <div class="skrow{{if not .Known}} unknown{{end}}{{if index $.Queued .SkillID}} inq{{end}}" data-group="g{{$i}}" data-name="{{.SkillName}}">
+        <span class="sq">{{$a := .ActiveLevel}}{{$t := .TrainedLevel}}{{$qL := index $.Queued .SkillID}}{{$tr := and (eq .SkillID $.TrainSkill) .Known}}{{range $l := seq 5}}<i class="{{if and $tr (eq $l $.TrainLvl)}}tr{{else if le $l $a}}on{{else if le $l $qL}}q{{else if le $l $t}}dim{{end}}"></i>{{end}}</span>
         <span class="nm">{{item .SkillID .SkillName}}</span>
         {{if .Known}}
-        <span class="sp muted">{{num .Skillpoints}} СП</span>
+        <span class="sp muted">{{num .Skillpoints}} СП{{$r := index $.Rates .SkillID}}{{if and $r (index $.Queued .SkillID)}} <i class="rate" title="скорость обучения с текущими атрибутами">{{sprate $r}}</i>{{end}}</span>
         {{else}}
         <span class="sp muted">не изучен</span>
         {{end}}
@@ -62,6 +63,7 @@
         <span class="sq">{{$c := .TrainedNow}}{{$f := .FinishedLevel}}{{range $l := seq 5}}<i class="{{if le $l $c}}on{{else if le $l $f}}q{{end}}"></i>{{end}}</span>
         <span class="nm" title="{{.SkillName}} {{roman .FinishedLevel}}">{{item .SkillID .SkillName}} <b class="lvl">{{roman .FinishedLevel}}</b></span>
         <span class="tm">
+          {{$r := index $.Rates .SkillID}}{{if $r}}<i class="rate" title="скорость обучения этого навыка">{{sprate $r}}</i>{{end}}
           {{if .Active}}<b data-countdown="{{.FinishDate.Format "2006-01-02T15:04:05Z07:00"}}">…</b>{{else if .Dur}}<b>{{.Dur}}</b>{{else}}<span class="muted">пауза</span>{{end}}
           {{if not .FinishDate.IsZero}}<span class="dt">~ {{.FinishDate.Format "02.01.2006"}}</span>{{end}}
         </span>
@@ -78,7 +80,7 @@
       {{if .QueuePaused}}
       <b class="paused">очередь на паузе</b>
       {{else}}
-      <b>{{.TotalDur}}</b>
+      <b>{{.TotalDur}}</b>{{if .ActiveRate}} <i class="rate" title="скорость обучения текущего навыка">{{sprate .ActiveRate}}</i>{{end}}
       {{if not .PlanEnds.IsZero}}<span class="ends">закончится ~ {{.PlanEnds.Format "02.01.2006 15:04"}}</span>{{end}}
       {{end}}
     </div>

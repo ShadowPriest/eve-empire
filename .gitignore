@@ -17,3 +17,5 @@ skill-plan*.txt
 *.exe
 /eve-empire
 /dist/
+*.exe~
+*~

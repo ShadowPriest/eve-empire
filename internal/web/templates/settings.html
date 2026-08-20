@@ -3,6 +3,8 @@
 
 {{range .Errors}}<p class="err">{{.}}</p>{{end}}
 
+<datalist id="acctlist">{{range .Groups}}{{if .Key}}<option value="{{.Key}}"></option>{{end}}{{end}}</datalist>
+
 <h2>Персонажи</h2>
 <p style="margin:.4rem 0 1rem;"><a class="btnlink" href="/login">+ Добавить персонажа</a></p>
 
@@ -18,6 +20,15 @@
       {{range .Tags}}<span class="tag tchip" data-tag="{{.}}">{{.}}<i class="x" title="убрать тег">×</i></span>{{end}}
       <span class="tag tadd" title="добавить теги">+</span>
     </div>
+    {{/* Аккаунт раньше назначался перетаскиванием карточки в сайдбаре —
+         догадаться об этом было невозможно. Здесь он просто поле. */}}
+    <form class="acctform" method="post" action="/characters/{{.ID}}/account">
+      <input type="hidden" name="back" value="/settings">
+      <label class="klabel" for="acct{{.ID}}">Аккаунт</label>
+      <input id="acct{{.ID}}" type="text" name="account" value="{{.Account}}"
+             list="acctlist" autocomplete="off" placeholder="без аккаунта">
+      <button type="submit">Сохранить</button>
+    </form>
   </div>
   <form method="post" action="/characters/{{.ID}}/delete"
         onsubmit="return confirm('Удалить {{.Name}} из кабинета?')">

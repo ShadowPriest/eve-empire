@@ -56,18 +56,64 @@ func Load() (*Config, error) {
 	return c, nil
 }
 
+// defaultScopes is exactly what the cabinet calls, and nothing else.
+//
+// GRABLE: не проси «все scopes». Полный список EVE — 72 разрешения и
+// 2.4 КБ текста; login.eveonline.com отвечает на такой authorize-запрос
+// «request too long» и логин не проходит вовсе. Обходной путь (открыть
+// персонажа в отдельном окне, потом позвать авторизацию) лечит симптом,
+// а не причину. Ниже — минимальный набор под РЕАЛЬНО используемые
+// эндпоинты; добавляя новый вызов ESI, добавляй сюда его scope.
 var defaultScopes = []string{
 	"publicData",
-	"esi-location.read_location.v1",
-	"esi-location.read_ship_type.v1",
-	"esi-location.read_online.v1",
-	"esi-wallet.read_character_wallet.v1",
-	"esi-skills.read_skills.v1",
-	"esi-skills.read_skillqueue.v1",
-	"esi-assets.read_assets.v1",
-	"esi-industry.read_character_jobs.v1",
-	"esi-markets.read_character_orders.v1",
-	"esi-corporations.read_projects.v1",
+
+	// персонаж: где, на чём, в сети ли
+	"esi-location.read_location.v1",  // /characters/{id}/location/
+	"esi-location.read_ship_type.v1", // /characters/{id}/ship/
+	"esi-location.read_online.v1",    // /characters/{id}/online/
+	"esi-ui.write_waypoint.v1",       // /ui/autopilot/waypoint/ (массовая прокладка)
+
+	// навыки, атрибуты, клоны
+	"esi-skills.read_skills.v1",     // /skills/ и /attributes/
+	"esi-skills.read_skillqueue.v1", // /skillqueue/
+	"esi-clones.read_clones.v1",     // /clones/
+	"esi-clones.read_implants.v1",   // /implants/
+
+	// кошелёк и рынок
+	"esi-wallet.read_character_wallet.v1",  // /wallet/, /journal/, /transactions/
+	"esi-markets.read_character_orders.v1", // /orders/
+	"esi-markets.structure_markets.v1",     // /markets/structures/{id}/
+
+	// имущество, чертежи, производство
+	"esi-assets.read_assets.v1",             // /assets/
+	"esi-characters.read_blueprints.v1",     // /blueprints/
+	"esi-industry.read_character_jobs.v1",   // /industry/jobs/
+	"esi-industry.read_character_mining.v1", // /mining/ (леджер добычи)
+
+	// планетарка (manage_planets — единственный scope планет, GET-only)
+	"esi-planets.manage_planets.v1",
+
+	// почта, уведомления, лояльность
+	"esi-mail.read_mail.v1",                // /mail/, /mail/labels/, /mail/lists/
+	"esi-characters.read_notifications.v1", // /notifications/
+	"esi-characters.read_loyalty.v1",       // /loyalty/points/
+
+	// структуры: имена цитаделей и корпоративный список
+	"esi-universe.read_structures.v1",     // /universe/structures/{id}/
+	"esi-corporations.read_structures.v1", // /corporations/{id}/structures/
+
+	// корпорация
+	"esi-corporations.read_divisions.v1",      // /divisions/
+	"esi-corporations.read_blueprints.v1",     // /corporations/{id}/blueprints/
+	"esi-corporations.read_projects.v1",       // /corporations/{id}/projects
+	"esi-assets.read_corporation_assets.v1",   // /corporations/{id}/assets/
+	"esi-industry.read_corporation_jobs.v1",   // /corporations/{id}/industry/jobs/
+	"esi-industry.read_corporation_mining.v1", // /corporation/{id}/mining/...
+	"esi-wallet.read_corporation_wallets.v1",  // /corporations/{id}/wallets/...
+
+	// флот: единственное место, где кабинет пишет в игру
+	"esi-fleets.read_fleet.v1",
+	"esi-fleets.write_fleet.v1",
 }
 
 func getEnv(key, def string) string {

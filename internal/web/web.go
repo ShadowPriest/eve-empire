@@ -23,6 +23,7 @@ import (
 	"eve-empire/internal/esi"
 	"eve-empire/internal/pi"
 	"eve-empire/internal/sde"
+	"eve-empire/internal/skillplan"
 	"eve-empire/internal/sso"
 	"eve-empire/internal/store"
 )
@@ -131,6 +132,14 @@ func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *s
 			}
 			return "desc"
 		},
+		// sprate печатает скорость обучения: СП в минуту — та
+		// единица, в которой это показывает и сама игра.
+		"sprate": func(v float64) string {
+			if v <= 0 {
+				return ""
+			}
+			return strconv.FormatFloat(math.Round(v*10)/10, 'f', -1, 64) + " СП/мин"
+		},
 		"volstr": func(v float64) string {
 			return strconv.FormatFloat(v, 'f', -1, 64) + " м³"
 		},
@@ -155,7 +164,7 @@ func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *s
 			}
 			return formatNum(int64(v + 0.5))
 		},
-		"sub":      func(a, b int) int { return a - b },
+		"sub": func(a, b int) int { return a - b },
 		"add": func(nums ...int) int {
 			t := 0
 			for _, n := range nums {
@@ -199,6 +208,15 @@ func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *s
 				return r[n]
 			}
 			return strconv.Itoa(n)
+		},
+		// emptyslots дополняет ряд портретов до тройки — столько
+		// слотов у аккаунта в игре, и пустые видно заглушками.
+		"emptyslots": func(n int) []int {
+			k := (3 - n%3) % 3
+			if n == 0 {
+				k = 3
+			}
+			return make([]int, k)
 		},
 		"seq": func(n int) []int {
 			s := make([]int, n)
@@ -438,7 +456,20 @@ type corpEntry struct {
 }
 
 // shell builds data every page shares: sidebar groups, corp list, selection.
+// charSections — реально существующие подстраницы персонажа.
+var charSections = map[string]bool{
+	"skills": true, "wallet": true, "industry": true, "market": true,
+	"assets": true, "clones": true, "blueprints": true, "planets": true,
+	"mail": true,
+}
+
 func (s *Server) shell(ec *esi.Client, selectedID int64, section string) (map[string]any, *store.Character, error) {
+	// Section — это подстраница ПЕРСОНАЖА: ссылки альтов в сайдбаре
+	// ведут в тот же раздел, что открыт сейчас. Страница настроек
+	// таковой не является, и /characters/{id}/settings отдавал 404.
+	if !charSections[section] {
+		section = ""
+	}
 	chars, err := s.Store.Characters()
 	if err != nil {
 		return nil, nil, err
@@ -3072,8 +3103,9 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 		wg    sync.WaitGroup
 		tree  []esi.SkillGroupTree
 		queue []esi.QueueEntry
+		attrs *esi.Attributes
 	)
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		var err error
@@ -3087,6 +3119,12 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 		if queue, err = ec.SkillQueue(selected.ID); err != nil {
 			errs.add("очередь", err)
 		}
+	}()
+	go func() {
+		defer wg.Done()
+		// Скорость обучения. ESI отдаёт атрибуты уже с имплантами,
+		// так что ничего доливать не надо.
+		attrs, _ = ec.CharacterAttributes(selected.ID)
 	}()
 	wg.Wait()
 
@@ -3104,6 +3142,46 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	data["TrainSkill"] = trainSkill
 	data["TrainLvl"] = trainLvl
+
+	// ── что из каталога стоит в очереди и с какой скоростью учится ──
+	// Каталог сам по себе не отвечает на вопрос «что из этой группы
+	// вообще учится»: у навыка видно изученные уровни, но не то, что он
+	// уже стоит в плане. Собираем и уровень из очереди, и счётчик на
+	// группу, и СП/мин — скорость у каждого навыка своя, она зависит от
+	// пары атрибутов.
+	queued := map[int64]int{}
+	for _, row := range qv.Rows {
+		if row.FinishedLevel > queued[row.SkillID] {
+			queued[row.SkillID] = row.FinishedLevel
+		}
+	}
+	groupQueued := make([]int, len(tree))
+	for i, g := range tree {
+		for _, sk := range g.Skills {
+			if queued[sk.SkillID] > 0 {
+				groupQueued[i]++
+			}
+		}
+	}
+	rates := map[int64]float64{}
+	if attrs != nil {
+		a := skillplan.Attrs{
+			"intelligence": attrs.Intelligence,
+			"memory":       attrs.Memory,
+			"perception":   attrs.Perception,
+			"willpower":    attrs.Willpower,
+			"charisma":     attrs.Charisma,
+		}
+		for id, info := range s.SDE.Skills() {
+			if info.Prim != "" {
+				rates[id] = a.Rate(info.Prim, info.Sec)
+			}
+		}
+	}
+	data["Queued"] = queued
+	data["GroupQueued"] = groupQueued
+	data["Rates"] = rates
+	data["ActiveRate"] = rates[trainSkill]
 
 	data["Sheet"] = sheet
 	data["Tree"] = tree
@@ -3986,8 +4064,8 @@ const (
 // There are always six of them: the colonies first, then the free
 // slots, then the ones the skill has not unlocked yet.
 type planetSlot struct {
-	Locked bool // Interplanetary Consolidation is not trained that far
-	Empty  bool // unlocked, but no colony on it
+	Locked bool      // Interplanetary Consolidation is not trained that far
+	Empty  bool      // unlocked, but no colony on it
 	Now    time.Time // the tile template renders countdowns against it
 
 	PlanetName   string
@@ -4065,16 +4143,16 @@ type yieldRow struct {
 
 // planetTotals are the headline numbers of the summary page.
 type planetTotals struct {
-	Chars           int // characters running colonies
-	Colonies        int
-	Allowed         int // planet slots unlocked across all alts
-	Free            int // unlocked but unused
-	ExtRun, ExtAll  int
-	FacRun, FacAll  int
-	StorFull        int // colonies at 90 % or more
-	YieldHr         float64
-	AlertsErr       int // already stopped
-	AlertsWarn      int // about to stop
+	Chars          int // characters running colonies
+	Colonies       int
+	Allowed        int // planet slots unlocked across all alts
+	Free           int // unlocked but unused
+	ExtRun, ExtAll int
+	FacRun, FacAll int
+	StorFull       int // colonies at 90 % or more
+	YieldHr        float64
+	AlertsErr      int // already stopped
+	AlertsWarn     int // about to stop
 }
 
 func (s *Server) handleEmpirePlanets(w http.ResponseWriter, r *http.Request) {
@@ -5322,7 +5400,13 @@ func (s *Server) handleSetAccount(w http.ResponseWriter, r *http.Request) {
 		httpError(w, "saving account", err)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/characters/%d", id), http.StatusFound)
+	// Аккаунт правят из настроек — возвращаемся туда же, а не на
+	// карточку персонажа.
+	back := r.FormValue("back")
+	if !strings.HasPrefix(back, "/") || strings.HasPrefix(back, "//") {
+		back = fmt.Sprintf("/characters/%d", id)
+	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 func (s *Server) handleSetTags(w http.ResponseWriter, r *http.Request) {
