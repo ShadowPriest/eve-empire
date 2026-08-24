@@ -507,10 +507,10 @@ type ColonyPin struct {
 		TypeID int64 `json:"type_id"`
 	} `json:"contents"`
 	ExtractorDetails *struct {
-		CycleTime     int   `json:"cycle_time"`
+		CycleTime     int     `json:"cycle_time"`
 		HeadRadius    float64 `json:"head_radius"`
-		ProductTypeID int64 `json:"product_type_id"`
-		QtyPerCycle   int64 `json:"qty_per_cycle"`
+		ProductTypeID int64   `json:"product_type_id"`
+		QtyPerCycle   int64   `json:"qty_per_cycle"`
 		Heads         []struct {
 			HeadID    int     `json:"head_id"`
 			Latitude  float64 `json:"latitude"`
@@ -595,13 +595,13 @@ func (c *Client) CharacterClones(characterID int64) (*Clones, error) {
 }
 
 type Attributes struct {
-	Charisma     int       `json:"charisma"`
-	Intelligence int       `json:"intelligence"`
-	Memory       int       `json:"memory"`
-	Perception   int       `json:"perception"`
-	Willpower    int       `json:"willpower"`
-	BonusRemaps  int       `json:"bonus_remaps"`
-	LastRemap    time.Time `json:"last_remap_date"`
+	Charisma          int       `json:"charisma"`
+	Intelligence      int       `json:"intelligence"`
+	Memory            int       `json:"memory"`
+	Perception        int       `json:"perception"`
+	Willpower         int       `json:"willpower"`
+	BonusRemaps       int       `json:"bonus_remaps"`
+	LastRemap         time.Time `json:"last_remap_date"`
 	RemapCooldownEnds time.Time `json:"accrued_remap_cooldown_date"`
 }
 
@@ -650,29 +650,70 @@ func (c *Client) WalletBalance(characterID int64) (float64, error) {
 	return balance, err
 }
 
+// JournalEntry is one wallet journal line.
+//
+// ID is the deduplication key: ESI keeps only a rolling window, so the
+// accounting collector stores every line locally and must never post the
+// same one twice.
+//
+// ContextID ties a line to what caused it, and its meaning changes with
+// ContextIDType. GRABLE (verified 2026-08-24): only some ref_types carry it
+// — market_transaction (transaction id) and contract_brokers_fee (contract
+// id) do, while brokers_fee and transaction_tax have no context field at
+// all and must be matched by time and amount instead.
 type JournalEntry struct {
-	Date        time.Time `json:"date"`
-	Amount      float64   `json:"amount"`
-	Balance     float64   `json:"balance"`
-	Description string    `json:"description"`
-	RefType     string    `json:"ref_type"`
+	ID            int64     `json:"id"`
+	Date          time.Time `json:"date"`
+	Amount        float64   `json:"amount"`
+	Balance       float64   `json:"balance"`
+	Description   string    `json:"description"`
+	RefType       string    `json:"ref_type"`
+	ContextID     int64     `json:"context_id"`
+	ContextIDType string    `json:"context_id_type"` // market_transaction_id|
+	// market_order_id|character_id|…
+	FirstPartyID  int64   `json:"first_party_id"`
+	SecondPartyID int64   `json:"second_party_id"`
+	Reason        string  `json:"reason"`
+	Tax           float64 `json:"tax"`
+	TaxReceiverID int64   `json:"tax_receiver_id"`
 }
 
+// WalletJournal returns the character's journal, all pages. ESI serves
+// 2500 lines per page and keeps roughly 30 days.
 func (c *Client) WalletJournal(characterID int64) ([]JournalEntry, error) {
 	var out []JournalEntry
-	_, err := c.get(characterID, fmt.Sprintf("/characters/%d/wallet/journal/", characterID), &out)
-	return out, err
+	for page := 1; ; page++ {
+		var chunk []JournalEntry
+		pages, err := c.get(characterID,
+			fmt.Sprintf("/characters/%d/wallet/journal/?page=%d", characterID, page), &chunk)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, chunk...)
+		if page >= pages {
+			return out, nil
+		}
+	}
 }
 
+// Transaction is one market fill.
+//
+// TransactionID deduplicates it; JournalRefID points at the wallet journal
+// line of the same fill, which is how a sale is tied to its sales tax.
+// The broker fee is NOT here at all — see JournalEntry.
 type Transaction struct {
-	Date         time.Time `json:"date"`
-	IsBuy        bool      `json:"is_buy"`
-	Quantity     int64     `json:"quantity"`
-	TypeID       int64     `json:"type_id"`
-	TypeName     string    `json:"-"`
-	UnitPrice    float64   `json:"unit_price"`
-	LocationID   int64     `json:"location_id"`
-	LocationName string    `json:"-"`
+	TransactionID int64     `json:"transaction_id"`
+	JournalRefID  int64     `json:"journal_ref_id"`
+	ClientID      int64     `json:"client_id"`
+	IsPersonal    bool      `json:"is_personal"`
+	Date          time.Time `json:"date"`
+	IsBuy         bool      `json:"is_buy"`
+	Quantity      int64     `json:"quantity"`
+	TypeID        int64     `json:"type_id"`
+	TypeName      string    `json:"-"`
+	UnitPrice     float64   `json:"unit_price"`
+	LocationID    int64     `json:"location_id"`
+	LocationName  string    `json:"-"`
 }
 
 // Total is the full transaction amount for display.
@@ -842,6 +883,14 @@ type MarketOrder struct {
 	LocationID   int64   `json:"location_id"`
 	LocationName string  `json:"-"`
 	Outbid       bool    `json:"-"` // set by the web layer from the order book
+	// Issued and Duration let the accounting collector spread a broker fee
+	// across the fills that happened after the order was placed or edited.
+	// State is only set by /orders/history/ (open on the live endpoint).
+	Issued   time.Time `json:"issued"`
+	Duration int       `json:"duration"`
+	Escrow   float64   `json:"escrow"`
+	RegionID int64     `json:"region_id"`
+	State    string    `json:"state"` // cancelled|expired, "" while live
 }
 
 func (c *Client) MarketOrders(characterID int64) ([]MarketOrder, error) {

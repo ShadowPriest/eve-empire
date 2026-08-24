@@ -20,6 +20,10 @@ type Config struct {
 	Scopes        []string
 	EncryptionKey []byte // 32 bytes for AES-256-GCM
 	UserAgent     string
+	// Collector turns the background accounting collector on. The dev copy
+	// usually wants it off: two copies polling the same characters double
+	// the ESI traffic for no benefit, since each has its own database.
+	Collector bool
 }
 
 // Load reads .env (if present) and then the environment.
@@ -34,6 +38,7 @@ func Load() (*Config, error) {
 		DBPath:       getEnv("DB_PATH", "eve-empire.db"),
 		SDEPath:      getEnv("SDE_PATH", "sde.db"),
 		UserAgent:    getEnv("ESI_USER_AGENT", "eve-empire/0.1"),
+		Collector:    !isOff(getEnv("COLLECTOR", "on")),
 	}
 
 	if c.ClientID == "" || c.ClientSecret == "" {
@@ -114,6 +119,23 @@ var defaultScopes = []string{
 	// флот: единственное место, где кабинет пишет в игру
 	"esi-fleets.read_fleet.v1",
 	"esi-fleets.write_fleet.v1",
+
+	// учёт ТМЦ: контракты объясняют, почему имущество ушло из ангара
+	// (курьерка, передача между альтами), килмейлы дают списание потерь.
+	// ГРАБЛЯ: пока альт не перелогинится, старый токен этих прав не имеет,
+	// и ESI отвечает 401 «Token is not valid for any required scope».
+	"esi-contracts.read_character_contracts.v1",   // /characters/{id}/contracts/
+	"esi-contracts.read_corporation_contracts.v1", // /corporations/{id}/contracts/
+	"esi-killmails.read_killmails.v1",             // /characters/{id}/killmails/recent/
+}
+
+// isOff reads the usual ways of writing "no" in an .env file.
+func isOff(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "off", "0", "false", "no":
+		return true
+	}
+	return false
 }
 
 func getEnv(key, def string) string {

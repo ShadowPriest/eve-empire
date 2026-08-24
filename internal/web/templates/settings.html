@@ -6,7 +6,8 @@
 <datalist id="acctlist">{{range .Groups}}{{if .Key}}<option value="{{.Key}}"></option>{{end}}{{end}}</datalist>
 
 <h2>Персонажи</h2>
-<p style="margin:.4rem 0 1rem;"><a class="btnlink" href="/login">+ Добавить персонажа</a></p>
+<p style="margin:.4rem 0 1rem;"><a class="btnlink" href="/login">+ Добавить персонажа</a>
+  <a class="btnlink" href="/reauth">Повторная авторизация</a></p>
 
 {{range .Groups}}
 {{range .Chars}}

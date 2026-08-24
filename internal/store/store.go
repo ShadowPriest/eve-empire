@@ -66,6 +66,11 @@ CREATE TABLE IF NOT EXISTS tokens (
 	for _, ddl := range []string{
 		`ALTER TABLE characters ADD COLUMN account TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE characters ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`,
+		// Каким приложением EVE выдан токен. Refresh-токен привязан к client_id,
+		// и база, приехавшая с другой копии, обновиться не сможет — колонка
+		// позволяет показать это до первой неудачной попытки. Пусто = токен
+		// сохранён до появления учёта, приложение неизвестно.
+		`ALTER TABLE tokens ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := s.db.Exec(ddl); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
@@ -154,7 +159,10 @@ CREATE TABLE IF NOT EXISTS mining_ledger (
     price        REAL NOT NULL DEFAULT 0, -- ISK per unit, Jita average that day
     PRIMARY KEY (character_id, day, system_id, type_id)
 )`)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.migrateHistory()
 }
 
 // ── mining ledger ────────────────────────────────────────────────────
@@ -568,7 +576,7 @@ func (s *Store) SetAccount(characterID int64, account string) error {
 }
 
 // UpsertCharacter stores/updates a character and its tokens after login.
-func (s *Store) UpsertCharacter(id int64, name string, refreshToken, accessToken string, expiresAt time.Time, scopes []string) error {
+func (s *Store) UpsertCharacter(id int64, name string, refreshToken, accessToken string, expiresAt time.Time, scopes []string, clientID string) error {
 	enc, err := encrypt(s.key, []byte(refreshToken))
 	if err != nil {
 		return fmt.Errorf("encrypt refresh token: %w", err)
@@ -586,14 +594,15 @@ ON CONFLICT(character_id) DO UPDATE SET name = excluded.name`, id, name, time.No
 		return err
 	}
 	if _, err := tx.Exec(`
-INSERT INTO tokens (character_id, refresh_token_enc, access_token, expires_at, scopes)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO tokens (character_id, refresh_token_enc, access_token, expires_at, scopes, client_id)
+VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(character_id) DO UPDATE SET
     refresh_token_enc = excluded.refresh_token_enc,
     access_token      = excluded.access_token,
     expires_at        = excluded.expires_at,
-    scopes            = excluded.scopes`,
-		id, enc, accessToken, expiresAt.Unix(), strings.Join(scopes, " ")); err != nil {
+    scopes            = excluded.scopes,
+    client_id         = excluded.client_id`,
+		id, enc, accessToken, expiresAt.Unix(), strings.Join(scopes, " "), clientID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -609,6 +618,26 @@ func (s *Store) UpdateTokens(characterID int64, refreshToken, accessToken string
 UPDATE tokens SET refresh_token_enc = ?, access_token = ?, expires_at = ?
 WHERE character_id = ?`, enc, accessToken, expiresAt.Unix(), characterID)
 	return err
+}
+
+// TokenClients maps character_id to the EVE application that issued the
+// stored token. An empty value means the token predates the column.
+func (s *Store) TokenClients() (map[int64]string, error) {
+	rows, err := s.db.Query(`SELECT character_id, client_id FROM tokens`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]string{}
+	for rows.Next() {
+		var id int64
+		var client string
+		if err := rows.Scan(&id, &client); err != nil {
+			return nil, err
+		}
+		out[id] = client
+	}
+	return out, rows.Err()
 }
 
 // RefreshToken returns the decrypted refresh token for a character.

@@ -33,6 +33,12 @@ var templateFS embed.FS
 
 const stateCookie = "eve_sso_state"
 
+// backCookie carries where to return after the SSO round-trip. Needed for
+// the re-authorization page: after login the callback must come back to the
+// list instead of the character card, otherwise 27 logins mean 27 manual
+// navigations back.
+const backCookie = "eve_sso_back"
+
 type Server struct {
 	SSO   *sso.Client
 	ESI   *esi.Client
@@ -256,6 +262,7 @@ func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *s
 		"settings", "skill_planner", "clones", "blueprints", "planetary_tool", "planets",
 		"empire_planets", "empire_wallets", "empire_training", "empire_industry", "fleet",
 		"mining", "ore", "market_watch", "build", "orders", "mail", "empire_structures",
+		"reauth",
 	} {
 		t, err := template.Must(layout.Clone()).ParseFS(templateFS, "templates/"+name+".html")
 		if err != nil {
@@ -270,6 +277,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /settings", s.handleSettings)
+	mux.HandleFunc("GET /reauth", s.handleReauth)
 	mux.HandleFunc("POST /settings/language", s.handleSetLanguage)
 	mux.HandleFunc("GET /planets", s.handleEmpirePlanets)
 	mux.HandleFunc("GET /mining", s.handleEmpireMining)
@@ -5344,6 +5352,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     backCookie,
+		Value:    localPath(r.URL.Query().Get("back")),
+		Path:     "/",
+		MaxAge:   600,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 	http.Redirect(w, r, s.SSO.AuthorizeURL(state), http.StatusFound)
 }
 
@@ -5378,7 +5394,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		claims.CharacterID, claims.CharacterName,
 		tok.RefreshToken, tok.AccessToken,
 		time.Now().Add(time.Duration(tok.ExpiresIn)*time.Second),
-		claims.Scopes,
+		claims.Scopes, s.SSO.ClientID,
 	)
 	if err != nil {
 		httpError(w, "saving character", err)
@@ -5386,7 +5402,16 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("logged in: %s (%d), %d scopes", claims.CharacterName, claims.CharacterID, len(claims.Scopes))
-	http.Redirect(w, r, fmt.Sprintf("/characters/%d", claims.CharacterID), http.StatusFound)
+
+	back := ""
+	if c, err := r.Cookie(backCookie); err == nil {
+		back = localPath(c.Value)
+	}
+	http.SetCookie(w, &http.Cookie{Name: backCookie, Path: "/", MaxAge: -1})
+	if back == "" {
+		back = fmt.Sprintf("/characters/%d", claims.CharacterID)
+	}
+	http.Redirect(w, r, back, http.StatusFound)
 }
 
 func (s *Server) handleSetAccount(w http.ResponseWriter, r *http.Request) {
@@ -5475,6 +5500,15 @@ func (e *errList) addAll(prefix string, msgs []string) {
 func httpError(w http.ResponseWriter, what string, err error) {
 	log.Printf("error %s: %v", what, err)
 	http.Error(w, "internal error: "+what, http.StatusInternalServerError)
+}
+
+// localPath keeps only same-site paths, so a crafted ?back= cannot bounce
+// the login to another host.
+func localPath(p string) string {
+	if !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") {
+		return ""
+	}
+	return p
 }
 
 func randomState() (string, error) {

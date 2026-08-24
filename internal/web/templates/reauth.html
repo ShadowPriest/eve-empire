@@ -1,0 +1,35 @@
+{{define "content"}}
+<h1>Повторная авторизация</h1>
+
+<div class="card maxm" style="display:block;">
+  {{if .Todo}}
+  <p style="margin:0 0 .6rem;">Осталось войти: <b>{{.Todo}}</b> из {{.Total}}.</p>
+  <p style="margin:0 0 1rem;" class="muted">
+    EVE сама покажет персонажей того аккаунта, под которым вы вошли — выбирайте
+    следующего из списка ниже. После входа вернётесь сюда же, и можно жать снова.
+    Чтобы перейти к другому аккаунту, на странице EVE выберите вход под другой
+    учётной записью.
+  </p>
+  <p style="margin:0;"><a class="btnlink" href="/login?back=/reauth">Войти ещё</a></p>
+  {{else}}
+  <p style="margin:0 0 1rem;">Все {{.Total}} персонажей авторизованы этим приложением.</p>
+  <p style="margin:0;"><a class="btnlink" href="/login?back=/reauth">Добавить ещё персонажа</a></p>
+  {{end}}
+</div>
+
+{{range .Accounts}}
+<h2>{{.Account}} {{if .Todo}}<span class="muted" style="font-size:.8rem;">— осталось {{.Todo}}</span>{{end}}</h2>
+<div class="card maxm" style="display:block;">
+  {{range .Rows}}
+  <div style="display:flex;align-items:center;gap:.6rem;padding:.25rem 0;">
+    <img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=32" alt=""
+         class="portrait" style="width:32px;height:32px;flex:none;">
+    <a class="alink" href="/characters/{{.ID}}" style="flex:1;min-width:0;">{{.Name}}</a>
+    {{if eq .State "ok"}}<span class="tag" title="токен выдан текущим приложением">готов</span>
+    {{else if eq .State "foreign"}}<span class="tag" title="токен выдан другим приложением EVE — обновиться не сможет">нужен вход</span>
+    {{else}}<span class="tag" title="токен сохранён до того, как приложение стали записывать">приложение неизвестно</span>{{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}
+{{end}}
