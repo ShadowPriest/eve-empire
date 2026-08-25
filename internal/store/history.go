@@ -189,7 +189,10 @@ CREATE TABLE IF NOT EXISTS collector_run (
     last_try INTEGER NOT NULL DEFAULT 0,
     note     TEXT    NOT NULL DEFAULT ''
 )`)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.migrateLedger()
 }
 
 // ── типы строк ───────────────────────────────────────────────────────

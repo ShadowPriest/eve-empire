@@ -1,0 +1,118 @@
+{{define "content"}}
+<h1>Учёт</h1>
+
+{{if .Message}}
+<div class="card maxm" style="display:block;">
+  <p style="margin:0;">{{.Message}}</p>
+</div>
+{{end}}
+
+<div class="card maxm" style="display:block;">
+  {{if .Opened}}
+  <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:.8rem;">
+    <div><div class="muted" style="font-size:.8rem;">склад по себестоимости</div>
+         <b style="font-size:1.15rem;">{{isk .Att.StockCost}}</b></div>
+    <div><div class="muted" style="font-size:.8rem;">живых партий</div>
+         <b style="font-size:1.15rem;">{{num .Att.Lots}}</b></div>
+    <div><div class="muted" style="font-size:.8rem;">документов</div>
+         <b style="font-size:1.15rem;">{{num .Att.Documents}}</b></div>
+    <div><div class="muted" style="font-size:.8rem;">на оценке, не по факту</div>
+         <b style="font-size:1.15rem;">{{printf "%.0f" .EstimateShare}}%</b>
+         <span class="muted">({{isk .Att.EstimateCost}})</span></div>
+  </div>
+  <p class="muted" style="margin:0 0 .8rem;">
+    Оценочная часть — то, что лежало на складе раньше, чем начал собираться кошелёк:
+    её цена взята с рынка, а не из закупки. Она будет таять сама по мере того, как
+    старый запас расходуется, а новый приходит с настоящей ценой.
+  </p>
+  {{else}}
+  <p style="margin:0 0 .8rem;">
+    Реестр пуст. Инвентаризация снимет текущее имущество всех альтов и корпораций
+    и заведёт начальные партии. То, что куплено за последние недели, будет оценено
+    по <b>фактической цене закупки</b>, остальное — по рынку с пометкой «оценка».
+  </p>
+  {{end}}
+  <form method="post" action="/accounting/build" style="margin:0;">
+    <button type="submit" class="btnlink">
+      {{if .Opened}}Дособрать реестр{{else}}Провести инвентаризацию империи{{end}}
+    </button>
+    <span class="muted" style="margin-left:.6rem;font-size:.85rem;">
+      повторный запуск безопасен: уже проведённые документы не дублируются
+    </span>
+  </form>
+</div>
+
+<h2>Маржа за 30 дней</h2>
+<div class="card maxm" style="display:block;">
+  {{if .Rows}}
+  <table class="tbl">
+    <thead><tr>
+      <th>Тип</th><th class="r">Сделок</th><th class="r">Штук</th>
+      <th class="r">Выручка</th><th class="r">Себестоимость</th>
+      <th class="r">Налог</th><th class="r">Прибыль</th><th class="r">Маржа</th>
+    </tr></thead>
+    <tbody>
+    {{range .Rows}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td class="r">{{num .Sales}}</td>
+        <td class="r">{{num .Quantity}}</td>
+        <td class="r">{{isk .Revenue}}</td>
+        <td class="r">{{isk .COGS}}</td>
+        <td class="r">{{isk .Tax}}</td>
+        <td class="r">{{isk .Profit}}</td>
+        <td class="r">{{printf "%.1f%%" .Margin}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+    <tfoot><tr>
+      <th>Итого</th><th></th><th></th>
+      <th class="r">{{isk .TotRevenue}}</th>
+      <th class="r">{{isk .TotCOGS}}</th>
+      <th class="r">{{isk .TotTax}}</th>
+      <th class="r">{{isk .TotProfit}}</th><th></th>
+    </tr></tfoot>
+  </table>
+  {{else}}
+  <p style="margin:0;">Продаж в реестре пока нет.</p>
+  <p class="muted" style="margin:.5rem 0 0;">
+    Это нормально сразу после инвентаризации: книги открыты сегодняшним числом, и
+    сделки, которые случились раньше, уже учтены в остатках — второй раз их
+    проводить нельзя. Маржа появится с первой же новой продажи, и у неё будет
+    настоящая себестоимость, а не рыночная оценка.
+  </p>
+  {{end}}
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    Здесь только <b>реализованная</b> прибыль — по проданному. Переоценка того, что
+    ещё лежит на складе, сюда намеренно не входит: иначе рост цен выглядел бы как
+    успешная торговля. Брокерский сбор в разрез по типам не попадает — ESI не
+    связывает его ни с ордером, ни со сделкой.
+  </p>
+</div>
+
+<h2>Склад по себестоимости</h2>
+<div class="card maxm" style="display:block;">
+  {{if .Stock}}
+  <table class="tbl">
+    <thead><tr>
+      <th>Тип</th><th>Где</th><th class="r">Штук</th>
+      <th class="r">Себестоимость</th><th class="r">Лежит, дней</th>
+    </tr></thead>
+    <tbody>
+    {{range .Stock}}
+      <tr>
+        <td>{{.Name}}{{if .Estimated}} <span class="tag" title="цена взята с рынка, а не из закупки">оценка</span>{{end}}</td>
+        <td class="muted">{{.Where}}</td>
+        <td class="r">{{num .Quantity}}</td>
+        <td class="r">{{isk .Cost}}</td>
+        <td class="r">{{num .Days}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if .StockMore}}<p class="muted" style="margin:.6rem 0 0;">… ещё {{num .StockMore}} позиций</p>{{end}}
+  {{else}}
+  <p style="margin:0;">Склад пуст — реестр ещё не заполнен.</p>
+  {{end}}
+</div>
+{{end}}

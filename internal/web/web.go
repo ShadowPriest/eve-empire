@@ -262,7 +262,7 @@ func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *s
 		"settings", "skill_planner", "clones", "blueprints", "planetary_tool", "planets",
 		"empire_planets", "empire_wallets", "empire_training", "empire_industry", "fleet",
 		"mining", "ore", "market_watch", "build", "orders", "mail", "empire_structures",
-		"reauth",
+		"reauth", "accounting",
 	} {
 		t, err := template.Must(layout.Clone()).ParseFS(templateFS, "templates/"+name+".html")
 		if err != nil {
@@ -278,6 +278,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("GET /reauth", s.handleReauth)
+	mux.HandleFunc("GET /accounting", s.handleAccounting)
+	mux.HandleFunc("POST /accounting/build", s.handleAccountingBuild)
 	mux.HandleFunc("POST /settings/language", s.handleSetLanguage)
 	mux.HandleFunc("GET /planets", s.handleEmpirePlanets)
 	mux.HandleFunc("GET /mining", s.handleEmpireMining)

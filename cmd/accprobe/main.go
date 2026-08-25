@@ -77,6 +77,8 @@ func main() {
 	diff := flag.String("diff", "", "сравнить два снимка: старый,новый")
 	contracts := flag.Bool("contracts", false, "показать контракты персонажей вместо снимка")
 	collectOne := flag.String("collect", "", "прогнать одну задачу сборщика: contracts|wallet|orders|jobs|assets")
+	buildLedger := flag.String("build", "", "собрать реестр из истории: average|adjusted")
+	showReport := flag.Bool("report", false, "показать отчёты реестра")
 	noCache := flag.Bool("nocache", true, "выбросить кэш ассетов перед запросом")
 	flag.Parse()
 
@@ -90,6 +92,10 @@ func main() {
 	}
 	if *collectOne != "" {
 		runCollector(*collectOne)
+		return
+	}
+	if *buildLedger != "" || *showReport {
+		runLedger(*buildLedger, *showReport)
 		return
 	}
 	if *chars != "" && *contracts {
