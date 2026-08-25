@@ -222,6 +222,118 @@
   {{end}}
 </div>
 
+<h2>Требует внимания</h2>
+<div class="card maxm" style="display:block;">
+  <ul style="margin:0;padding-left:1.1rem;">
+    {{if .ReconDiffs}}<li>Расхождений сверки: <b>{{num .ReconDiffs}}</b> — разобрать выше.</li>{{end}}
+    {{if .Att.EstimateLots}}<li>Партий с оценочной ценой: <b>{{num .Att.EstimateLots}}</b>
+      на {{isk .Att.EstimateCost}} — это {{printf "%.0f" .EstimateShare}}% склада.
+      Их цена взята с рынка, а не из закупки.</li>{{end}}
+    {{if .FeesUnmatchedN}}<li>Брокерских сборов без ордера: <b>{{num .FeesUnmatchedN}}</b>
+      на {{isk .FeesUnmatched}} — ESI не связывает сбор ни с ордером, ни со сделкой,
+      и остаётся только совпадение по времени.</li>{{end}}
+    {{if .SafetyQty}}<li>В asset safety: <b>{{num .SafetyQty}}</b> ед. — это ваше добро,
+      но у него есть срок и сбор за выдачу.</li>{{end}}
+    {{if .TransitQty}}<li>Под чужой обёрткой в пути: <b>{{num .TransitQty}}</b> ед.</li>{{end}}
+  </ul>
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    Пусто в этом списке — не признак порядка сам по себе: сверка пока не знает про
+    контракты, колонии и незавершённое производство чужих работ.
+  </p>
+</div>
+
+<h2>Закрытие периода</h2>
+<div class="card maxm" style="display:block;">
+  {{if .ClosedBefore}}
+  <p style="margin:0 0 .6rem;">Книги закрыты до <b>{{.ClosedBefore}}</b>: документы этой
+    датой и раньше не проводятся.</p>
+  <form method="post" action="/accounting/close" style="margin:0;">
+    <input type="hidden" name="do" value="open">
+    <button type="submit" class="btnlink">Открыть обратно</button>
+  </form>
+  {{else}}
+  <p style="margin:0 0 .6rem;">Период не закрыт — задним числом проводится что угодно.</p>
+  <form method="post" action="/accounting/close" style="margin:0;display:flex;gap:.4rem;align-items:center;">
+    <input type="date" name="date" value="{{.CloseDefault}}">
+    <button type="submit" class="btnlink">Закрыть период</button>
+  </form>
+  {{end}}
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    Закрытый период не правится задним числом: поправки идут новым документом. Без
+    этого однажды вчерашний отчёт перестанет совпадать с сегодняшним, и доверия к
+    цифрам не будет. Сбор данных и сверка продолжают работать как обычно — отказ
+    касается только проводки документов старой датой.
+  </p>
+</div>
+
+<h2>Капитал за 30 дней</h2>
+<div class="card maxm" style="display:block;">
+  <table class="tbl">
+    <tbody>
+      <tr><td>ISK на кошельках</td>
+          <td class="r">{{isk .Cap.ISKFrom}}</td><td class="r">→ {{isk .Cap.ISKTo}}</td>
+          <td class="r"><b>{{isk .Cap.DeltaISK}}</b></td></tr>
+      <tr><td>Склад по себестоимости</td>
+          <td class="r">{{isk .Cap.StockFrom}}</td><td class="r">→ {{isk .Cap.StockTo}}</td>
+          <td class="r"><b>{{isk .Cap.DeltaStock}}</b></td></tr>
+      {{if .Cap.Opening}}
+      <tr><td class="muted">из них начальные остатки — вклад, не заработок</td>
+          <td></td><td></td><td class="r muted">{{isk .Cap.Opening}}</td></tr>
+      {{end}}
+      <tr><td>Движение ISK, проведённое реестром</td>
+          <td></td><td></td><td class="r">{{isk .Cap.Explained}}</td></tr>
+      <tr><td><b>Невязка</b> — движение ISK, которого реестр не знает</td>
+          <td></td><td></td><td class="r"><b>{{isk .Cap.Residual}}</b></td></tr>
+      <tr><td><b>Прибыль реестра</b></td>
+          <td></td><td></td><td class="r"><b>{{isk .Cap.Profit}}</b></td></tr>
+    </tbody>
+  </table>
+  <p class="muted" style="margin:.7rem 0 .8rem;font-size:.85rem;">
+    Тождество простое: ISK плюс склад — это весь капитал, и его изменение обязано
+    равняться прибыли. Сходиться оно и не должно, пока реестр знает только рыночные
+    сделки: баунти, награды, продажа PLEX и переводы между своими в него не попадают.
+    Поэтому здесь не вердикт «сошлось», а <b>невязка</b> и её разбор — сразу видно,
+    чего именно не хватает.
+  </p>
+
+  <table class="tbl">
+    <thead><tr><th>Вид движения ISK</th><th class="r">Сумма</th><th>В реестре</th></tr></thead>
+    <tbody>
+    {{range .CapKinds}}
+      <tr>
+        <td>{{.RefType}}</td>
+        <td class="r">{{isk .Amount}}</td>
+        <td>{{if .Posted}}<span class="tag">проведено</span>{{else}}<span class="muted">нет</span>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if .CapKindsMore}}<p class="muted" style="margin:.6rem 0 0;">… ещё {{num .CapKindsMore}} видов</p>{{end}}
+</div>
+
+{{if .Stages}}
+<h2>Вклад по переделам</h2>
+<div class="card maxm" style="display:block;">
+  <table class="tbl">
+    <thead><tr><th>Передел</th><th class="r">Документов</th>
+      <th class="r">Вошло по рынку</th><th class="r">Вышло по рынку</th>
+      <th class="r">Вклад</th></tr></thead>
+    <tbody>
+    {{range .Stages}}
+      <tr><td>{{.Name}}</td><td class="r">{{num .Docs}}</td>
+        <td class="r">{{isk .InMkt}}</td><td class="r">{{isk .OutMkt}}</td>
+        <td class="r">{{isk .Added}}</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    Без этого разреза вся прибыль цепочки «копал → перерабатывал → строил → продал»
+    падает на последний шаг, и «выгодно ли было производить» остаётся без ответа.
+    Считается по рыночной оценке на момент движения, а не по себестоимости.
+  </p>
+</div>
+{{end}}
+
 <h2>Склад по себестоимости</h2>
 <div class="card maxm" style="display:block;">
   {{if .Stock}}

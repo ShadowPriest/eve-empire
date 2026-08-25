@@ -26,6 +26,10 @@ import (
 // a shortage for the whole duration (§2, НЗП).
 const wipFlag = "WIP"
 
+// esiPrice keeps only what the ledger needs, so a nil ESI client (tests)
+// costs nothing.
+type esiPrice struct{ Average float64 }
+
 // Jobs posts manufacturing and reaction jobs.
 func (b *Builder) Jobs(sdeDB *sde.DB) (Result, error) {
 	var res Result
@@ -64,6 +68,19 @@ func (b *Builder) Jobs(sdeDB *sde.DB) (Result, error) {
 		}
 	}
 
+	// Рыночная оценка продукта нужна разрезу «вклад по переделам»: без неё
+	// у производства вход оценён, а выход нет, и передел покажет
+	// отрицательный вклад на ровном месте.
+	var prices map[int64]esiPrice
+	if b.ESI != nil {
+		if p, err := b.ESI.MarketPrices(); err == nil {
+			prices = make(map[int64]esiPrice, len(p))
+			for id, v := range p {
+				prices[id] = esiPrice{Average: v.Average}
+			}
+		}
+	}
+
 	muls := map[int64]float64{}
 	before, noRecipe := 0, 0
 
@@ -94,7 +111,8 @@ func (b *Builder) Jobs(sdeDB *sde.DB) (Result, error) {
 				mul = b.facilityMul(sdeDB, j.OwnerID, j.FacilityID)
 				muls[j.FacilityID] = mul
 			}
-			r, err := b.postJobStart(j, recipe, sdeDB, meOf[j.BlueprintID], mul, key)
+			r, err := b.postJobStart(j, recipe, sdeDB, meOf[j.BlueprintID], mul, key,
+				prices[recipe.ProductID].Average)
 			if err != nil {
 				return res, fmt.Errorf("работа %d: %w", j.JobID, err)
 			}
@@ -123,7 +141,7 @@ func (b *Builder) Jobs(sdeDB *sde.DB) (Result, error) {
 
 // postJobStart consumes the materials and parks the output in WIP.
 func (b *Builder) postJobStart(j store.JobRow, recipe sde.Recipe, sdeDB *sde.DB,
-	me int, matMul float64, key string) (store.PostResult, error) {
+	me int, matMul float64, key string, unitMkt float64) (store.PostResult, error) {
 
 	at := j.StartDate
 	facility := store.PlaceKey{OwnerID: j.OwnerID, LocationID: j.FacilityID, Flag: "Hangar"}
@@ -147,11 +165,13 @@ func (b *Builder) postJobStart(j store.JobRow, recipe sde.Recipe, sdeDB *sde.DB,
 	}
 	// Сбор за установку капитализируется в продукт (§8): без него работа
 	// выглядела бы бесплатной, а сбор — убытком из ниоткуда.
+	out := recipe.ProductQty * int64(j.Runs)
 	lines = append(lines, store.Line{
 		Place: wip, TypeID: recipe.ProductID,
-		Qty:       recipe.ProductQty * int64(j.Runs),
+		Qty:       out,
 		CostFrom:  "doc",
 		CostExtra: j.Cost,
+		MktTotal:  unitMkt * float64(out),
 	})
 
 	return b.Store.PostDoc(store.Doc{

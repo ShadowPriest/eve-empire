@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -174,8 +175,31 @@ type CashLine struct {
 // PostResult reports what a posting actually did.
 type PostResult struct {
 	DocID     int64
-	Posted    bool  // false = this src/src_id was already in the ledger
+	Posted    bool  // false = уже было в реестре либо период закрыт
+	Closed    bool  // отказ: документ старше закрытого периода
 	Shortfall int64 // units issued without a lot to back them
+}
+
+// ClosedBefore is the instant the books are sealed at. Anything older is
+// refused, so yesterday's report cannot quietly change under a reader.
+func (s *Store) ClosedBefore() time.Time {
+	v := s.Setting("acc.closed_before")
+	if v == "" {
+		return time.Time{}
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(n, 0)
+}
+
+// SetClosedBefore seals everything before t. A zero time reopens.
+func (s *Store) SetClosedBefore(t time.Time) error {
+	if t.IsZero() {
+		return s.SetSetting("acc.closed_before", "")
+	}
+	return s.SetSetting("acc.closed_before", strconv.FormatInt(t.Unix(), 10))
 }
 
 // ── проводка ─────────────────────────────────────────────────────────
@@ -185,6 +209,18 @@ type PostResult struct {
 // lets the whole ledger be rebuilt from hist_* by simply running again.
 func (s *Store) PostDoc(d Doc, lines []Line, cash []CashLine) (PostResult, error) {
 	var res PostResult
+
+	// ГРАБЛЯ: у store одно соединение (SetMaxOpenConns(1)), поэтому любой
+	// запрос ВНУТРИ транзакции встанет намертво. Всё, что нужно прочитать,
+	// читается до Begin.
+	//
+	// Закрытый период не правится задним числом: поправки идут новым
+	// документом, иначе вчерашний отчёт однажды перестанет совпадать с
+	// сегодняшним и доверия к цифрам не будет (§3).
+	if closed := s.ClosedBefore(); !closed.IsZero() && d.At.Before(closed) {
+		return PostResult{Closed: true}, nil
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return res, err
@@ -308,15 +344,22 @@ func (s *Store) receive(tx *sql.Tx, docID int64, at time.Time, ln Line) error {
 	if kind == "" {
 		kind = "fact"
 	}
+	// ГРАБЛЯ. Партия и движение датируются ПО-РАЗНОМУ.
+	// Партия помнит дату приобретения — на ней стоит порядок FIFO и
+	// «возраст остатка». Движение помнит, когда его записали.
+	// Если датировать движение задним числом, инвентаризация с её
+	// датами закупок размажется по прошлому, и контрольная сумма
+	// капитала посчитает начальные остатки прибылью.
+	lotAt := at
 	if !ln.At.IsZero() {
-		at = ln.At
+		lotAt = ln.At
 	}
 	r, err := tx.Exec(`INSERT INTO acc_lot
 		(type_id, owner_id, place_id, stack_item_id, qty_init, qty_left,
 		 cost_total, cost_left, mkt_total, mkt_left, cost_kind, doc_id, at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		ln.TypeID, ln.Place.OwnerID, placeID, ln.StackItemID, ln.Qty, ln.Qty,
-		ln.CostTotal, ln.CostTotal, ln.MktTotal, ln.MktTotal, kind, docID, at.Unix())
+		ln.CostTotal, ln.CostTotal, ln.MktTotal, ln.MktTotal, kind, docID, lotAt.Unix())
 	if err != nil {
 		return err
 	}

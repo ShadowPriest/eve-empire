@@ -197,3 +197,70 @@ func runRecon() {
 			trim34(names[l.LocationID]))
 	}
 }
+
+// runCapital prints the balance identity and what it cannot explain.
+func runCapital(days int) {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	st, err := store.Open(cfg.DBPath, cfg.EncryptionKey)
+	if err != nil {
+		log.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+
+	opened, err := st.OpeningTimes()
+	if err != nil {
+		log.Fatal(err)
+	}
+	from := time.Now().AddDate(0, 0, -30)
+	if days > 0 {
+		from = time.Now().AddDate(0, 0, -days)
+	} else {
+		for _, t := range opened {
+			from = t
+		}
+	}
+	to := time.Now().Add(time.Minute)
+
+	c, err := st.Capital(from, to)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("КАПИТАЛ с %s по %s\n", c.From.Format("02.01 15:04"), c.To.Format("02.01 15:04"))
+	fmt.Printf("  ISK:   %14s → %-14s  изменение %s\n", isk(c.ISKFrom), isk(c.ISKTo), isk(c.DeltaISK))
+	fmt.Printf("  склад: %14s → %-14s  изменение %s\n", isk(c.StockFrom), isk(c.StockTo), isk(c.DeltaStock))
+	fmt.Printf("  под ордерами на покупку сейчас: %s\n\n", isk(c.Escrow))
+	fmt.Printf("  движение ISK, проведённое реестром: %s\n", isk(c.Explained))
+	fmt.Printf("  НЕВЯЗКА (реестр этого не знает):    %s\n", isk(c.Residual))
+	if c.Opening != 0 {
+		fmt.Println("  из них начальные остатки (вклад собственника, не прибыль):", isk(c.Opening))
+	}
+	fmt.Println("  ПРИБЫЛЬ РЕЕСТРА:", isk(c.Profit))
+	fmt.Println()
+	fmt.Println("  движение ISK по видам:")
+	for i, k := range c.Kinds {
+		if i >= 12 {
+			fmt.Printf("    … ещё %d видов\n", len(c.Kinds)-12)
+			break
+		}
+		mark := "НЕ проведено"
+		if k.Posted {
+			mark = "проведено"
+		}
+		fmt.Printf("    %-28s %16s  %s\n", k.RefType, isk(k.Amount), mark)
+	}
+
+	stages, err := st.Stages(from, to)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if len(stages) > 0 {
+		fmt.Println("\n  вклад по переделам (по рыночной оценке):")
+		for _, s := range stages {
+			fmt.Printf("    %-14s док. %3d   вошло %14s   вышло %14s   вклад %s\n",
+				s.Kind, s.Docs, isk(s.InMkt), isk(s.OutMkt), isk(s.Added))
+		}
+	}
+}

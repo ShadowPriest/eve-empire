@@ -376,3 +376,36 @@ func TestReprocessSplitsByShare(t *testing.T) {
 		t.Errorf("сумма выходов %.2f, а списано было 10 000 000", got[0]+got[1])
 	}
 }
+
+// TestPeriodClose: закрытый период не принимает документы задним числом.
+// Иначе вчерашний отчёт однажды перестанет совпадать с сегодняшним.
+func TestPeriodClose(t *testing.T) {
+	s := testStore(t)
+	if err := s.SetClosedBefore(time.Now().AddDate(0, 0, -2)); err != nil {
+		t.Fatal(err)
+	}
+	old, err := s.PostDoc(
+		Doc{Kind: "purchase", OwnerID: owner, At: time.Now().AddDate(0, 0, -5),
+			Src: "test", SrcID: "old"},
+		[]Line{{Place: hangar(), TypeID: strontium, Qty: 10, CostTotal: 100}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !old.Closed || old.Posted {
+		t.Errorf("документ старше закрытия принят: closed=%v posted=%v", old.Closed, old.Posted)
+	}
+	fresh, err := s.PostDoc(
+		Doc{Kind: "purchase", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "new"},
+		[]Line{{Place: hangar(), TypeID: strontium, Qty: 10, CostTotal: 100}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fresh.Posted {
+		t.Error("свежий документ не прошёл, хотя период открыт")
+	}
+	var lots int
+	s.db.QueryRow(`SELECT COUNT(*) FROM acc_lot`).Scan(&lots)
+	if lots != 1 {
+		t.Errorf("партий %d, ожидалась 1 — закрытый период не должен был ничего создать", lots)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"eve-empire/internal/ledger"
+	"eve-empire/internal/store"
 )
 
 // Складской и финансовый учёт (ACCOUNTING.md, этап 1).
@@ -52,6 +53,22 @@ type accProd struct {
 	InWIP    bool
 	When     string
 	Note     string
+}
+
+// accStage is one processing step and what it added.
+type accStage struct {
+	Name   string
+	Docs   int
+	InMkt  float64
+	OutMkt float64
+	Added  float64
+}
+
+var stageNames = map[string]string{
+	"purchase": "закупка", "sale": "продажа", "manufacture": "производство",
+	"reaction": "реакции", "reprocess": "переработка", "transfer": "перемещение",
+	"receipt": "ручной приход", "writeoff": "списание", "delivery": "выдача работ",
+	"fee": "комиссии", "opening": "начальные остатки",
 }
 
 func (s *Server) handleAccounting(w http.ResponseWriter, r *http.Request) {
@@ -141,6 +158,29 @@ func (s *Server) handleAccountingRecon(w http.ResponseWriter, r *http.Request) {
 			msg = "списание: " + err.Error()
 		} else {
 			msg = fmt.Sprintf("списано %d ед. (%s)", qty, reason)
+		}
+	}
+	s.accountingPage(w, r, msg)
+}
+
+// handleAccountingClose seals the books before a date.
+func (s *Server) handleAccountingClose(w http.ResponseWriter, r *http.Request) {
+	var msg string
+	if r.FormValue("do") == "open" {
+		if err := s.Store.SetClosedBefore(time.Time{}); err != nil {
+			msg = "открыть период: " + err.Error()
+		} else {
+			msg = "период снова открыт — задним числом снова можно"
+		}
+	} else {
+		d, err := time.Parse("2006-01-02", r.FormValue("date"))
+		if err != nil {
+			msg = "не понял дату, нужен формат ГГГГ-ММ-ДД"
+		} else if err := s.Store.SetClosedBefore(d); err != nil {
+			msg = "закрыть период: " + err.Error()
+		} else {
+			msg = "период закрыт до " + d.Format("02.01.2006") +
+				" — правки задним числом больше не проводятся"
 		}
 	}
 	s.accountingPage(w, r, msg)
@@ -309,6 +349,53 @@ func (s *Server) accountingPage(w http.ResponseWriter, r *http.Request, msg stri
 	data["MadeCost"] = madeCost
 	data["MadeMarket"] = madeMarket
 	data["MadeDelta"] = madeMarket - madeCost
+
+	// ── капитал и контрольная сумма ──
+	cap30, err := s.Store.Capital(from, to)
+	if err != nil {
+		httpError(w, "capital", err)
+		return
+	}
+	var kinds []store.CashKind
+	for i, k := range cap30.Kinds {
+		if i >= 14 {
+			break
+		}
+		kinds = append(kinds, k)
+	}
+	data["Cap"] = cap30
+	data["CapKinds"] = kinds
+	data["CapKindsMore"] = len(cap30.Kinds) - len(kinds)
+
+	stages, err := s.Store.Stages(from, to)
+	if err != nil {
+		httpError(w, "stages", err)
+		return
+	}
+	byStage := make([]accStage, 0, len(stages))
+	for _, st := range stages {
+		name := stageNames[st.Kind]
+		if name == "" {
+			name = st.Kind
+		}
+		byStage = append(byStage, accStage{Name: name, Docs: st.Docs,
+			InMkt: st.InMkt, OutMkt: st.OutMkt, Added: st.Added})
+	}
+	data["Stages"] = byStage
+
+	feeN, feeSum, err := s.Store.UnmatchedFees()
+	if err != nil {
+		httpError(w, "fees", err)
+		return
+	}
+	data["FeesUnmatchedN"] = feeN
+	data["FeesUnmatched"] = feeSum
+
+	closed := s.Store.ClosedBefore()
+	if !closed.IsZero() {
+		data["ClosedBefore"] = closed.Format("02.01.2006")
+	}
+	data["CloseDefault"] = time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 
 	data["Recon"] = recon
 	data["ReconChecked"] = sum.Checked

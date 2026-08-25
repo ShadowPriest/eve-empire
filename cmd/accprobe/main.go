@@ -78,6 +78,8 @@ func main() {
 	contracts := flag.Bool("contracts", false, "показать контракты персонажей вместо снимка")
 	collectOne := flag.String("collect", "", "прогнать одну задачу сборщика: contracts|wallet|orders|jobs|assets")
 	buildLedger := flag.String("build", "", "собрать реестр из истории: average|adjusted")
+	capDays := flag.Int("days", 0, "период контрольной суммы в днях (0 = с открытия книг)")
+	capital := flag.Bool("capital", false, "контрольная сумма капитала и вклад по переделам")
 	recon := flag.Bool("recon", false, "показать расхождения реестра с действительностью")
 	showReport := flag.Bool("report", false, "показать отчёты реестра")
 	noCache := flag.Bool("nocache", true, "выбросить кэш ассетов перед запросом")
@@ -93,6 +95,10 @@ func main() {
 	}
 	if *collectOne != "" {
 		runCollector(*collectOne)
+		return
+	}
+	if *capital {
+		runCapital(*capDays)
 		return
 	}
 	if *recon {

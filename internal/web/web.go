@@ -281,6 +281,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /accounting", s.handleAccounting)
 	mux.HandleFunc("POST /accounting/build", s.handleAccountingBuild)
 	mux.HandleFunc("POST /accounting/recon", s.handleAccountingRecon)
+	mux.HandleFunc("POST /accounting/close", s.handleAccountingClose)
 	mux.HandleFunc("POST /settings/language", s.handleSetLanguage)
 	mux.HandleFunc("GET /planets", s.handleEmpirePlanets)
 	mux.HandleFunc("GET /mining", s.handleEmpireMining)
