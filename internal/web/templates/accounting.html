@@ -42,6 +42,90 @@
   </form>
 </div>
 
+<h2>Сверка с действительностью</h2>
+<div class="card maxm" style="display:block;">
+  <p style="margin:0 0 .6rem;">
+    Сопоставлено <b>{{num .ReconChecked}}</b> сочетаний «владелец · локация · тип»,
+    расходится <b>{{num .ReconDiffs}}</b>.
+    {{if .OnMarketQty}}На витрине {{num .OnMarketQty}} ед.{{end}}
+    {{if .TransitQty}} В пути под обёрткой {{num .TransitQty}} ед.{{end}}
+    {{if .SafetyQty}} В asset safety {{num .SafetyQty}} ед.{{end}}
+  </p>
+  <p class="muted" style="margin:0 0 .8rem;font-size:.85rem;">
+    Сверяется <b>ассеты + витрина</b> против остатка реестра. Груз под чужой
+    Plastic Wrap исключён: он лежит у перевозчика, а принадлежит отправителю.
+    Контракты, колонии и незавершённое производство пока не учитываются — по ним
+    расхождение будет ложным.
+  </p>
+
+  {{if .Recon}}
+  {{if .ReconTransfers}}
+  <form method="post" action="/accounting/recon" style="margin:0 0 1rem;">
+    <input type="hidden" name="do" value="transfers">
+    <button type="submit" class="btnlink">Провести перемещения ({{num .ReconTransfers}})</button>
+    <span class="muted" style="margin-left:.6rem;font-size:.85rem;">
+      себестоимость переезжает вместе с товаром, итоги не меняются
+    </span>
+  </form>
+  {{end}}
+
+  <table class="tbl">
+    <thead><tr>
+      <th>Что</th><th>Тип</th><th class="r">Штук</th>
+      <th>Откуда</th><th>Куда</th><th></th>
+    </tr></thead>
+    <tbody>
+    {{range .Recon}}
+      <tr>
+        <td>{{if eq .Kind "transfer"}}перемещение{{else if eq .Kind "receipt"}}<b>излишек</b>{{else}}<b>недостача</b>{{end}}
+            {{if .Note}}<span class="muted" style="font-size:.8rem;">— {{.Note}}</span>{{end}}</td>
+        <td>{{.Name}}</td>
+        <td class="r">{{num .Qty}}</td>
+        <td class="muted">{{if eq .Kind "receipt"}}—{{else}}{{.FromWho}}<br><span style="font-size:.8rem;">{{.From}}</span>{{end}}</td>
+        <td class="muted">{{if eq .Kind "writeoff"}}—{{else}}{{.ToWho}}<br><span style="font-size:.8rem;">{{.To}}</span>{{end}}</td>
+        <td>
+          {{if ne .Kind "transfer"}}
+          <form method="post" action="/accounting/recon" style="display:flex;gap:.3rem;align-items:center;margin:0;">
+            <input type="hidden" name="do" value="{{if eq .Kind "receipt"}}receipt{{else}}writeoff{{end}}">
+            <input type="hidden" name="owner" value="{{.Owner}}">
+            <input type="hidden" name="loc" value="{{.Location}}">
+            <input type="hidden" name="type" value="{{.TypeID}}">
+            <input type="hidden" name="qty" value="{{.Qty}}">
+            {{if eq .Kind "receipt"}}
+            <select name="source">
+              <option value="лут">лут</option>
+              <option value="переработка">переработка</option>
+              <option value="добыча">добыча</option>
+              <option value="планетарка">планетарка</option>
+              <option value="подарок">подарок</option>
+              <option value="прочее">прочее</option>
+            </select>
+            <select name="price">
+              <option value="zero">цена 0</option>
+              <option value="market">по рынку (оценка)</option>
+            </select>
+            <button type="submit" class="btnlink">Оприходовать</button>
+            {{else}}
+            <select name="source">
+              <option value="потеря">потеря</option>
+              <option value="передано наружу">передано наружу</option>
+              <option value="ушло в работу">ушло в работу</option>
+              <option value="прочее">прочее</option>
+            </select>
+            <button type="submit" class="btnlink">Списать</button>
+            {{end}}
+          </form>
+          {{end}}
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p style="margin:0;">Расхождений нет — реестр сходится с действительностью.</p>
+  {{end}}
+</div>
+
 <h2>Маржа за 30 дней</h2>
 <div class="card maxm" style="display:block;">
   {{if .Rows}}
@@ -96,7 +180,8 @@
   <table class="tbl">
     <thead><tr>
       <th>Тип</th><th>Где</th><th class="r">Штук</th>
-      <th class="r">Себестоимость</th><th class="r">Лежит, дней</th>
+      <th class="r">Себестоимость</th><th class="r">По рынку</th>
+      <th class="r">Разница</th><th class="r">Лежит, дней</th>
     </tr></thead>
     <tbody>
     {{range .Stock}}
@@ -105,12 +190,19 @@
         <td class="muted">{{.Where}}</td>
         <td class="r">{{num .Quantity}}</td>
         <td class="r">{{isk .Cost}}</td>
+        <td class="r">{{isk .Market}}</td>
+        <td class="r">{{isk .Delta}}</td>
         <td class="r">{{num .Days}}</td>
       </tr>
     {{end}}
     </tbody>
   </table>
   {{if .StockMore}}<p class="muted" style="margin:.6rem 0 0;">… ещё {{num .StockMore}} позиций</p>{{end}}
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    «Разница» — что даст продажа сверх себестоимости, до брокера и налога. У позиций
+    с пометкой «оценка» себестоимость взята с рынка, поэтому разница у них около нуля
+    и ни о чём не говорит, пока их цена не уточнится.
+  </p>
   {{else}}
   <p style="margin:0;">Склад пуст — реестр ещё не заполнен.</p>
   {{end}}

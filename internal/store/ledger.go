@@ -139,6 +139,12 @@ type Line struct {
 	CostKind    string // fact|estimate, default fact
 	StackItemID int64
 
+	// CostFrom = "issue" берёт себестоимость этой строки прихода из того,
+	// что списано в ЭТОМ ЖЕ документе по тому же типу. Так себестоимость
+	// переезжает вместе с товаром при перемещении и переносится на продукт
+	// при переработке — вместо того чтобы выдумываться заново.
+	CostFrom string
+
 	// расход
 	Alloc []Alloc // nil = FIFO
 	// Scope widens the search when the exact place has too little: goods
@@ -196,18 +202,39 @@ func (s *Store) PostDoc(d Doc, lines []Line, cash []CashLine) (PostResult, error
 	res.DocID, _ = r.LastInsertId()
 	res.Posted = true
 
+	// Списания идут ПЕРВЫМИ: приход с CostFrom="issue" забирает их
+	// себестоимость, а не выдумывает свою. На этом стоят и перемещение
+	// (цена едет с товаром), и переработка (цена переходит на минералы).
+	issued := map[int64]float64{}
+	// Оценка не должна отмываться в факт переездом: если хоть часть
+	// списанного была прикидкой, приход наследует эту пометку.
+	guessed := map[int64]bool{}
 	for _, ln := range lines {
-		switch {
-		case ln.Qty > 0:
-			if err := s.receive(tx, res.DocID, d.At, ln); err != nil {
-				return res, err
+		if ln.Qty >= 0 {
+			continue
+		}
+		short, cost, est, err := s.issue(tx, res.DocID, d.At, ln)
+		if err != nil {
+			return res, err
+		}
+		res.Shortfall += short
+		issued[ln.TypeID] += cost
+		if est {
+			guessed[ln.TypeID] = true
+		}
+	}
+	for _, ln := range lines {
+		if ln.Qty <= 0 {
+			continue
+		}
+		if ln.CostFrom == "issue" {
+			ln.CostTotal = issued[ln.TypeID]
+			if guessed[ln.TypeID] {
+				ln.CostKind = "estimate"
 			}
-		case ln.Qty < 0:
-			short, err := s.issue(tx, res.DocID, d.At, ln)
-			if err != nil {
-				return res, err
-			}
-			res.Shortfall += short
+		}
+		if err := s.receive(tx, res.DocID, d.At, ln); err != nil {
+			return res, err
 		}
 	}
 	for _, c := range cash {
@@ -275,20 +302,24 @@ func (s *Store) receive(tx *sql.Tx, docID int64, at time.Time, ln Line) error {
 }
 
 type lotRow struct {
-	id       int64
-	qtyLeft  int64
-	costLeft float64
-	mktLeft  float64
-	placeID  int64
+	id        int64
+	qtyLeft   int64
+	costLeft  float64
+	mktLeft   float64
+	placeID   int64
+	estimated bool
 }
 
-// issue consumes lots for one outgoing line and returns how many units it
-// could not back with a real lot.
-func (s *Store) issue(tx *sql.Tx, docID int64, at time.Time, ln Line) (int64, error) {
+// issue consumes lots for one outgoing line. It returns how many units it
+// could not back with a real lot, and the total cost it took off the shelf
+// — the latter is what a transfer or a reprocess hands to its receipt.
+func (s *Store) issue(tx *sql.Tx, docID int64, at time.Time, ln Line) (int64, float64, bool, error) {
 	need := -ln.Qty
+	var spent float64
+	var estimated bool
 	placeID, err := s.placeID(tx, ln.Place)
 	if err != nil {
-		return 0, err
+		return 0, 0, false, err
 	}
 
 	take := func(l lotRow, qty int64) error {
@@ -306,6 +337,10 @@ func (s *Store) issue(tx *sql.Tx, docID int64, at time.Time, ln Line) (int64, er
 			WHERE id = ?`, qty, cost, mkt, l.id); err != nil {
 			return err
 		}
+		spent += cost
+		if l.estimated {
+			estimated = true
+		}
 		_, err := tx.Exec(`INSERT INTO acc_move (doc_id, lot_id, place_id, type_id, qty, cost, mkt, at)
 			VALUES (?,?,?,?,?,?,?,?)`,
 			docID, l.id, l.placeID, ln.TypeID, -qty, -cost, -mkt, at.Unix())
@@ -315,17 +350,17 @@ func (s *Store) issue(tx *sql.Tx, docID int64, at time.Time, ln Line) (int64, er
 	// Explicit allocation: specific identification, the manual override.
 	for _, a := range ln.Alloc {
 		var l lotRow
-		if err := tx.QueryRow(`SELECT id, qty_left, cost_left, mkt_left, place_id
-			FROM acc_lot WHERE id = ?`, a.LotID).
-			Scan(&l.id, &l.qtyLeft, &l.costLeft, &l.mktLeft, &l.placeID); err != nil {
-			return 0, fmt.Errorf("партия %d: %w", a.LotID, err)
+		if err := tx.QueryRow(`SELECT id, qty_left, cost_left, mkt_left, place_id,
+			cost_kind = 'estimate' FROM acc_lot WHERE id = ?`, a.LotID).
+			Scan(&l.id, &l.qtyLeft, &l.costLeft, &l.mktLeft, &l.placeID, &l.estimated); err != nil {
+			return 0, 0, false, fmt.Errorf("партия %d: %w", a.LotID, err)
 		}
 		qty := min64(a.Qty, l.qtyLeft, need)
 		if qty <= 0 {
 			continue
 		}
 		if err := take(l, qty); err != nil {
-			return 0, err
+			return 0, 0, false, err
 		}
 		need -= qty
 	}
@@ -343,7 +378,7 @@ func (s *Store) issue(tx *sql.Tx, docID int64, at time.Time, ln Line) (int64, er
 	for i := start; i < len(scopes) && need > 0; i++ {
 		lots, err := s.candidateLots(tx, ln, placeID, scopes[i])
 		if err != nil {
-			return 0, err
+			return 0, 0, false, err
 		}
 		for _, l := range lots {
 			if need <= 0 {
@@ -351,7 +386,7 @@ func (s *Store) issue(tx *sql.Tx, docID int64, at time.Time, ln Line) (int64, er
 			}
 			qty := min64(need, l.qtyLeft)
 			if err := take(l, qty); err != nil {
-				return 0, err
+				return 0, 0, false, err
 			}
 			need -= qty
 		}
@@ -361,7 +396,7 @@ func (s *Store) issue(tx *sql.Tx, docID int64, at time.Time, ln Line) (int64, er
 	}
 
 	if need <= 0 {
-		return 0, nil
+		return 0, spent, estimated, nil
 	}
 	// Nothing left to draw on. Never silently zero: make an estimate lot so
 	// the shortage is visible and priced, then consume it.
@@ -373,17 +408,18 @@ func (s *Store) issue(tx *sql.Tx, docID int64, at time.Time, ln Line) (int64, er
 		ln.TypeID, ln.Place.OwnerID, placeID, need, need, cost, cost, cost, cost,
 		docID, at.Unix())
 	if err != nil {
-		return 0, err
+		return 0, 0, false, err
 	}
 	lotID, _ := r.LastInsertId()
-	if err := take(lotRow{id: lotID, qtyLeft: need, costLeft: cost, mktLeft: cost, placeID: placeID}, need); err != nil {
-		return 0, err
+	if err := take(lotRow{id: lotID, qtyLeft: need, costLeft: cost, mktLeft: cost, placeID: placeID, estimated: true}, need); err != nil {
+		return 0, 0, false, err
 	}
-	return need, nil
+	return need, spent, true, nil
 }
 
 func (s *Store) candidateLots(tx *sql.Tx, ln Line, placeID int64, scope string) ([]lotRow, error) {
-	q := `SELECT l.id, l.qty_left, l.cost_left, l.mkt_left, l.place_id
+	q := `SELECT l.id, l.qty_left, l.cost_left, l.mkt_left, l.place_id,
+		       l.cost_kind = 'estimate'
 		FROM acc_lot l JOIN acc_place p ON p.id = l.place_id
 		WHERE l.qty_left > 0 AND l.type_id = ? AND l.owner_id = ?`
 	args := []any{ln.TypeID, ln.Place.OwnerID}
@@ -407,7 +443,8 @@ func (s *Store) candidateLots(tx *sql.Tx, ln Line, placeID int64, scope string) 
 	var out []lotRow
 	for rows.Next() {
 		var l lotRow
-		if err := rows.Scan(&l.id, &l.qtyLeft, &l.costLeft, &l.mktLeft, &l.placeID); err != nil {
+		if err := rows.Scan(&l.id, &l.qtyLeft, &l.costLeft, &l.mktLeft, &l.placeID,
+			&l.estimated); err != nil {
 			return nil, err
 		}
 		out = append(out, l)

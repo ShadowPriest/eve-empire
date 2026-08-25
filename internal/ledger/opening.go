@@ -43,6 +43,13 @@ func (b *Builder) Opening(priceSource string) (Result, error) {
 		res.Note = "снимков имущества ещё нет — сначала должен отработать сбор"
 		return res, nil
 	}
+	// Товар на витрине физически из ангара уехал и в /assets/ его нет
+	// (§7.1). Без него инвентаризация теряет реальное имущество.
+	onMarket, err := b.Store.MarketGroups()
+	if err != nil {
+		return res, err
+	}
+	groups = append(groups, onMarket...)
 	prices, err := b.ESI.MarketPrices()
 	if err != nil {
 		return res, fmt.Errorf("цены: %w", err)

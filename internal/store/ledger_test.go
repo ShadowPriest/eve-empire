@@ -207,3 +207,75 @@ func TestScopeWidening(t *testing.T) {
 		t.Errorf("нехватка %d: расход не нашёл партию в контейнере той же станции", res.Shortfall)
 	}
 }
+
+// TestTransferCarriesCost: moving goods must not create or destroy value.
+// A transfer priced at market instead of at cost would let profit be
+// manufactured by shuffling stock between alts.
+func TestTransferCarriesCost(t *testing.T) {
+	s := testStore(t)
+	buy(t, s, "A", 100, 7, 3)
+
+	const other = int64(60003761)
+	to := PlaceKey{OwnerID: owner, LocationID: other, Flag: "Hangar"}
+	if _, err := s.PostDoc(
+		Doc{Kind: "transfer", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "mv1"},
+		[]Line{
+			{Place: hangar(), TypeID: strontium, Qty: -100, Scope: "location"},
+			{Place: to, TypeID: strontium, Qty: 100, CostFrom: "issue"},
+		}, nil); err != nil {
+		t.Fatalf("перемещение: %v", err)
+	}
+
+	var qty int64
+	var cost float64
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(qty_left),0), COALESCE(SUM(cost_left),0)
+		FROM acc_lot WHERE qty_left > 0`).Scan(&qty, &cost); err != nil {
+		t.Fatal(err)
+	}
+	if qty != 100 || !near(cost, 700) {
+		t.Errorf("после переезда %d шт на %.2f, ожидалось 100 шт на 700", qty, cost)
+	}
+	// And it must actually be at the destination now.
+	var atDest int64
+	s.db.QueryRow(`SELECT COALESCE(SUM(l.qty_left),0) FROM acc_lot l
+		JOIN acc_place p ON p.id = l.place_id
+		WHERE p.location_id = ?`, other).Scan(&atDest)
+	if atDest != 100 {
+		t.Errorf("в точке назначения %d шт, ожидалось 100", atDest)
+	}
+}
+
+// TestEstimateSurvivesTransfer: a guessed price must not become a fact by
+// moving the goods. Otherwise a report could not say how much of the
+// profit still rests on guesses — the flag would launder itself away.
+func TestEstimateSurvivesTransfer(t *testing.T) {
+	s := testStore(t)
+	if _, err := s.PostDoc(
+		Doc{Kind: "opening", OwnerID: owner, At: time.Now().AddDate(0, 0, -2),
+			Src: "test", SrcID: "open"},
+		[]Line{{Place: hangar(), TypeID: strontium, Qty: 100,
+			CostTotal: 500, CostKind: "estimate"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	to := PlaceKey{OwnerID: owner, LocationID: 60003761, Flag: "Hangar"}
+	if _, err := s.PostDoc(
+		Doc{Kind: "transfer", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "mv2"},
+		[]Line{
+			{Place: hangar(), TypeID: strontium, Qty: -100, Scope: "location"},
+			{Place: to, TypeID: strontium, Qty: 100, CostFrom: "issue"},
+		}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var kind string
+	var cost float64
+	if err := s.db.QueryRow(`SELECT cost_kind, cost_left FROM acc_lot
+		WHERE qty_left > 0`).Scan(&kind, &cost); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "estimate" {
+		t.Errorf("после переезда партия помечена %q — оценка отмылась в факт", kind)
+	}
+	if !near(cost, 500) {
+		t.Errorf("себестоимость после переезда %.2f, ожидалось 500", cost)
+	}
+}

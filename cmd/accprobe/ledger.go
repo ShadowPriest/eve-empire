@@ -145,3 +145,52 @@ func abs(v float64) float64 {
 	}
 	return v
 }
+
+// runRecon prints what the ledger and reality disagree about.
+func runRecon() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	st, err := store.Open(cfg.DBPath, cfg.EncryptionKey)
+	if err != nil {
+		log.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+	ec := esi.New(sso.New(cfg.ClientID, cfg.ClientSecret, cfg.CallbackURL, cfg.Scopes, cfg.UserAgent), st, cfg.UserAgent)
+	ec.SetLanguage(st.Setting("language"))
+
+	sum, err := st.Reconcile()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if sum.NoAssets {
+		fmt.Println("снимков имущества нет — сверять не с чем")
+		return
+	}
+	fmt.Printf("СВЕРКА: сопоставлено %d сочетаний (владелец, локация, тип), расхождений %d\n",
+		sum.Checked, len(sum.Lines))
+	fmt.Printf("  на витрине %d ед., в пути под обёрткой %d ед., в asset safety %d ед.\n\n",
+		sum.OnMarketQty, sum.TransitQty, sum.SafetyQty)
+
+	var ids []int64
+	for _, l := range sum.Lines {
+		ids = append(ids, l.TypeID, l.LocationID)
+	}
+	names := ec.Names(ids)
+	shown := 0
+	for _, l := range sum.Lines {
+		if shown >= 20 {
+			fmt.Printf("  … ещё %d\n", len(sum.Lines)-shown)
+			break
+		}
+		shown++
+		sign := "недостача"
+		if l.Surplus() {
+			sign = "излишек  "
+		}
+		fmt.Printf("  %s %-30s %+8d   ассеты %d, витрина %d, реестр %d   @ %s\n",
+			sign, trim34(names[l.TypeID]), l.Diff, l.InAssets, l.OnMarket, l.Ledger,
+			trim34(names[l.LocationID]))
+	}
+}

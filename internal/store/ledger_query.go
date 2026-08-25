@@ -42,6 +42,29 @@ HAVING SUM(a.quantity) > 0`)
 	return out, rows.Err()
 }
 
+// MarketGroups returns goods sitting on open sell orders. They left the
+// hangar when the order was placed and appear in NO asset row, so an
+// inventory built from /assets/ alone silently loses them — the first
+// reconciliation after the first inventory found exactly that.
+func (s *Store) MarketGroups() ([]AssetGroup, error) {
+	rows, err := s.db.Query(`SELECT owner_id, location_id, type_id, SUM(volume_remain)
+		FROM hist_order WHERE is_buy = 0 AND state = 'open' AND volume_remain > 0
+		GROUP BY owner_id, location_id, type_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AssetGroup
+	for rows.Next() {
+		g := AssetGroup{Flag: "Market", HolderName: "на витрине"}
+		if err := rows.Scan(&g.OwnerID, &g.LocationID, &g.TypeID, &g.Quantity); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // Transactions returns collected fills, oldest first — the order they must
 // be posted in, or FIFO would consume lots that did not exist yet.
 func (s *Store) Transactions() ([]TxRow, error) {

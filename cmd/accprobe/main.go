@@ -78,6 +78,7 @@ func main() {
 	contracts := flag.Bool("contracts", false, "показать контракты персонажей вместо снимка")
 	collectOne := flag.String("collect", "", "прогнать одну задачу сборщика: contracts|wallet|orders|jobs|assets")
 	buildLedger := flag.String("build", "", "собрать реестр из истории: average|adjusted")
+	recon := flag.Bool("recon", false, "показать расхождения реестра с действительностью")
 	showReport := flag.Bool("report", false, "показать отчёты реестра")
 	noCache := flag.Bool("nocache", true, "выбросить кэш ассетов перед запросом")
 	flag.Parse()
@@ -92,6 +93,10 @@ func main() {
 	}
 	if *collectOne != "" {
 		runCollector(*collectOne)
+		return
+	}
+	if *recon {
+		runRecon()
 		return
 	}
 	if *buildLedger != "" || *showReport {
