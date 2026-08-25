@@ -12,15 +12,20 @@ import (
 	"time"
 
 	"eve-empire/internal/esi"
+	"eve-empire/internal/sde"
 	"eve-empire/internal/store"
 )
 
 type Builder struct {
 	Store *store.Store
 	ESI   *esi.Client
+	SDE   *sde.DB // нужен производству: состав работы ESI не отдаёт
 }
 
 func New(st *store.Store, ec *esi.Client) *Builder { return &Builder{Store: st, ESI: ec} }
+
+// WithSDE attaches the static database so production can be posted.
+func (b *Builder) WithSDE(d *sde.DB) *Builder { b.SDE = d; return b }
 
 // Result is what a build pass did, for the page that triggered it.
 type Result struct {
@@ -307,13 +312,22 @@ func (b *Builder) BuildAll(priceSource string) (Result, error) {
 	if err != nil {
 		return total, err
 	}
-	total.Documents = open.Documents + trades.Documents + fees.Documents
+	var jobs Result
+	if b.SDE != nil {
+		if jobs, err = b.Jobs(b.SDE); err != nil {
+			return total, err
+		}
+	}
+	total.Documents = open.Documents + trades.Documents + fees.Documents + jobs.Documents
 	total.Lots = open.Lots
 	total.Skipped = open.Skipped + trades.Skipped + fees.Skipped
-	total.Shortfall = trades.Shortfall
+	total.Shortfall = trades.Shortfall + jobs.Shortfall
 	total.Note = fmt.Sprintf("остатки: %s; сделки: документов %d, нехватка %d ед.; %s",
 		firstNonEmpty(open.Note, fmt.Sprintf("партий %d", open.Lots)),
 		trades.Documents, trades.Shortfall, fees.Note)
+	if jobs.Note != "" {
+		total.Note += "; производство: " + jobs.Note
+	}
 	return total, nil
 }
 

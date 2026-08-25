@@ -182,6 +182,22 @@ CREATE TABLE IF NOT EXISTS asset_change (
 );
 CREATE INDEX IF NOT EXISTS asset_change_at ON asset_change(at);
 
+-- Blueprints, for their researched ME. A job tells you which blueprint
+-- ITEM it used but not its efficiency, and without ME the material list
+-- cannot be reproduced at all.
+CREATE TABLE IF NOT EXISTS hist_blueprint (
+    owner_id    INTEGER NOT NULL,
+    item_id     INTEGER NOT NULL,
+    type_id     INTEGER NOT NULL,
+    location_id INTEGER NOT NULL DEFAULT 0,
+    quantity    INTEGER NOT NULL DEFAULT 0, -- -1 оригинал, -2 копия
+    runs        INTEGER NOT NULL DEFAULT 0, -- -1 у оригинала
+    me          INTEGER NOT NULL DEFAULT 0,
+    te          INTEGER NOT NULL DEFAULT 0,
+    seen_at     INTEGER NOT NULL,
+    PRIMARY KEY (owner_id, item_id)
+);
+
 -- One row per collector task: when it last succeeded and what it said.
 CREATE TABLE IF NOT EXISTS collector_run (
     task     TEXT PRIMARY KEY,
@@ -674,6 +690,53 @@ func (s *Store) insertMany(n int, query string, args func(int) []any) (int, erro
 }
 
 var _ = sql.ErrNoRows
+
+type BlueprintRow struct {
+	OwnerID    int64
+	ItemID     int64
+	TypeID     int64
+	LocationID int64
+	Quantity   int64
+	Runs       int64
+	ME, TE     int
+}
+
+// SaveBlueprints upserts blueprints: research changes ME over time, and a
+// copy loses runs as it is used.
+func (s *Store) SaveBlueprints(rows []BlueprintRow, seenAt time.Time) (int, error) {
+	return s.insertMany(len(rows), `INSERT INTO hist_blueprint
+		(owner_id, item_id, type_id, location_id, quantity, runs, me, te, seen_at)
+		VALUES (?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(owner_id, item_id) DO UPDATE SET
+			location_id = excluded.location_id, quantity = excluded.quantity,
+			runs = excluded.runs, me = excluded.me, te = excluded.te,
+			seen_at = excluded.seen_at`,
+		func(i int) []any {
+			r := rows[i]
+			return []any{r.OwnerID, r.ItemID, r.TypeID, r.LocationID, r.Quantity,
+				r.Runs, r.ME, r.TE, seenAt.Unix()}
+		})
+}
+
+// BlueprintME maps a blueprint ITEM id to its researched ME. A job names
+// the item it used, so this is the only way to reproduce its materials.
+func (s *Store) BlueprintME() (map[int64]int, error) {
+	rows, err := s.db.Query(`SELECT item_id, me FROM hist_blueprint`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int{}
+	for rows.Next() {
+		var id int64
+		var me int
+		if err := rows.Scan(&id, &me); err != nil {
+			return nil, err
+		}
+		out[id] = me
+	}
+	return out, rows.Err()
+}
 
 // NamedAssets returns the item ids of this owner that already carry a
 // name, so the collector asks ESI only for the ones it has never seen.

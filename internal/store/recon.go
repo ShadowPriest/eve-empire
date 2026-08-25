@@ -149,9 +149,12 @@ func (s *Store) Reconcile() (ReconSummary, error) {
 	}
 
 	// ── остаток реестра ──
+	// НЗП из сравнения исключено: материалы работа уже съела, а продукта
+	// ещё нет — в действительности его нет ни в ангаре, ни на витрине,
+	// и требовать, чтобы он там нашёлся, значило бы врать (§2, §7.1).
 	led, err := s.db.Query(`SELECT l.owner_id, p.location_id, l.type_id, SUM(l.qty_left)
 		FROM acc_lot l JOIN acc_place p ON p.id = l.place_id
-		WHERE l.qty_left > 0
+		WHERE l.qty_left > 0 AND p.flag <> 'WIP'
 		GROUP BY l.owner_id, p.location_id, l.type_id`)
 	if err != nil {
 		return sum, err

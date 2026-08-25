@@ -139,11 +139,19 @@ type Line struct {
 	CostKind    string // fact|estimate, default fact
 	StackItemID int64
 
-	// CostFrom = "issue" берёт себестоимость этой строки прихода из того,
-	// что списано в ЭТОМ ЖЕ документе по тому же типу. Так себестоимость
-	// переезжает вместе с товаром при перемещении и переносится на продукт
-	// при переработке — вместо того чтобы выдумываться заново.
-	CostFrom string
+	// CostFrom говорит, откуда взять себестоимость прихода:
+	//   ""      — из CostTotal, как есть;
+	//   "issue" — из списанного в этом документе по ТОМУ ЖЕ типу
+	//             (перемещение: цена едет с товаром);
+	//   "doc"   — из списанного в документе ЦЕЛИКОМ, доля CostShare
+	//             (производство: материалы становятся продуктом;
+	//              переработка: делит вход между выходами по NRV).
+	// Так себестоимость переносится, а не выдумывается заново.
+	CostFrom  string
+	CostShare float64 // доля при CostFrom="doc", 0 читается как 1
+	// CostExtra добавляется к себестоимости прихода: сбор за установку
+	// работы капитализируется в продукт (§8).
+	CostExtra float64
 
 	// расход
 	Alloc []Alloc // nil = FIFO
@@ -227,12 +235,30 @@ func (s *Store) PostDoc(d Doc, lines []Line, cash []CashLine) (PostResult, error
 		if ln.Qty <= 0 {
 			continue
 		}
-		if ln.CostFrom == "issue" {
+		switch ln.CostFrom {
+		case "issue":
 			ln.CostTotal = issued[ln.TypeID]
 			if guessed[ln.TypeID] {
 				ln.CostKind = "estimate"
 			}
+		case "doc":
+			share := ln.CostShare
+			if share == 0 {
+				share = 1
+			}
+			var total float64
+			for _, v := range issued {
+				total += v
+			}
+			ln.CostTotal = total * share
+			for _, g := range guessed {
+				if g {
+					ln.CostKind = "estimate"
+					break
+				}
+			}
 		}
+		ln.CostTotal += ln.CostExtra
 		if err := s.receive(tx, res.DocID, d.At, ln); err != nil {
 			return res, err
 		}

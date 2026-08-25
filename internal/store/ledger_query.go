@@ -374,3 +374,79 @@ func (s *Store) OpeningTimes() (map[int64]time.Time, error) {
 	}
 	return out, rows.Err()
 }
+
+// Jobs returns collected industry jobs, oldest first.
+func (s *Store) Jobs() ([]JobRow, error) {
+	rows, err := s.db.Query(`SELECT owner_id, job_id, installer_id, activity_id,
+		blueprint_id, blueprint_type_id, product_type_id, runs, successful_runs,
+		cost, status, facility_id, start_date, end_date, completed_date
+		FROM hist_job ORDER BY start_date, job_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []JobRow
+	for rows.Next() {
+		var j JobRow
+		var start, end, done int64
+		if err := rows.Scan(&j.OwnerID, &j.JobID, &j.InstallerID, &j.ActivityID,
+			&j.BlueprintID, &j.BlueprintTypeID, &j.ProductTypeID, &j.Runs,
+			&j.SuccessfulRuns, &j.Cost, &j.Status, &j.FacilityID,
+			&start, &end, &done); err != nil {
+			return nil, err
+		}
+		j.StartDate = time.Unix(start, 0)
+		j.EndDate = time.Unix(end, 0)
+		if done > 0 {
+			j.CompletedDate = time.Unix(done, 0)
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+// ProductionLine is one finished (or running) job seen from the money side.
+type ProductionLine struct {
+	DocID    int64
+	At       time.Time
+	TypeID   int64
+	Quantity int64
+	Cost     float64 // материалы + сбор за установку, всё что съела работа
+	Note     string
+	InWIP    bool // продукт ещё не выдан, лежит в НЗП
+}
+
+// Production lists what was made and what it actually cost.
+//
+// The cost here is the FACT — the real purchase prices of the materials
+// that were consumed — which is exactly what /tools/build cannot know: it
+// prices a plan at today's market. Put side by side, the two answer
+// "насколько выгодно я это пустил в производство".
+func (s *Store) Production(from, to time.Time) ([]ProductionLine, error) {
+	rows, err := s.db.Query(`
+SELECT d.id, d.at, m.type_id, m.qty, m.cost, d.note,
+       MAX(CASE WHEN p.flag = 'WIP' THEN 1 ELSE 0 END)
+FROM acc_doc d
+JOIN acc_move m ON m.doc_id = d.id AND m.qty > 0
+JOIN acc_place p ON p.id = m.place_id
+WHERE d.kind IN ('manufacture','reaction') AND d.at >= ? AND d.at < ?
+GROUP BY d.id, m.type_id, m.qty, m.cost, d.note
+ORDER BY d.at DESC`, from.Unix(), to.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ProductionLine
+	for rows.Next() {
+		var l ProductionLine
+		var at int64
+		var wip int
+		if err := rows.Scan(&l.DocID, &at, &l.TypeID, &l.Quantity, &l.Cost,
+			&l.Note, &wip); err != nil {
+			return nil, err
+		}
+		l.At, l.InWIP = time.Unix(at, 0), wip == 1
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}

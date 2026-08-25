@@ -24,10 +24,12 @@ const (
 	scopeWallet       = "esi-wallet.read_character_wallet.v1"
 	scopeOrders       = "esi-markets.read_character_orders.v1"
 	scopeJobs         = "esi-industry.read_character_jobs.v1"
+	scopeBlueprints   = "esi-characters.read_blueprints.v1"
 	scopeAssets       = "esi-assets.read_assets.v1"
 	scopeContracts    = "esi-contracts.read_character_contracts.v1"
 	scopeCorpWallet   = "esi-wallet.read_corporation_wallets.v1"
 	scopeCorpAssets   = "esi-assets.read_corporation_assets.v1"
+	scopeCorpBPs      = "esi-corporations.read_blueprints.v1"
 	scopeCorpContract = "esi-contracts.read_corporation_contracts.v1"
 )
 
@@ -90,6 +92,7 @@ func (c *Collector) Tasks() []sched.Task {
 		{Name: "wallet", Every: time.Hour, First: 45 * time.Second, Run: c.Wallets},
 		{Name: "orders", Every: time.Hour, First: 90 * time.Second, Run: c.Orders},
 		{Name: "jobs", Every: 30 * time.Minute, First: 2 * time.Minute, Run: c.Jobs},
+		{Name: "blueprints", Every: 6 * time.Hour, First: 4 * time.Minute, Run: c.Blueprints},
 		{Name: "assets", Every: time.Hour, First: 3 * time.Minute, Run: c.Assets},
 	}
 }
@@ -346,6 +349,72 @@ func (c *Collector) Jobs(ctx context.Context) error {
 		total += n
 	}
 	return c.note("jobs", started, total, errs)
+}
+
+// ── чертежи ──────────────────────────────────────────────────────────
+
+// Blueprints collects researched ME/TE. Rarely changes, so six-hourly is
+// plenty — but without it the material list of a job cannot be rebuilt,
+// because ESI names the blueprint item and never its efficiency.
+func (c *Collector) Blueprints(ctx context.Context) error {
+	started := time.Now()
+	chars, err := c.chars()
+	if err != nil {
+		return err
+	}
+	var errs []string
+	total := 0
+	for _, ch := range chars {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !c.has(ch, scopeBlueprints) {
+			continue
+		}
+		bps, err := c.ESI.CharacterBlueprints(ch.ID)
+		if err != nil {
+			errs = append(errs, ch.Name+": "+err.Error())
+			continue
+		}
+		rows := make([]store.BlueprintRow, 0, len(bps))
+		for _, b := range bps {
+			rows = append(rows, store.BlueprintRow{
+				OwnerID: ch.ID, ItemID: b.ItemID, TypeID: b.TypeID,
+				LocationID: b.LocationID, Quantity: b.Quantity, Runs: b.Runs,
+				ME: b.ME, TE: b.TE,
+			})
+		}
+		n, err := c.Store.SaveBlueprints(rows, started)
+		if err != nil {
+			errs = append(errs, ch.Name+": "+err.Error())
+		}
+		total += n
+	}
+	// Корп-чертежи: работу могли поставить с корпоративного чертежа, и без
+	// него ME взять неоткуда. Нужна роль Director.
+	for _, corp := range c.corps(chars) {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !c.has(corp.viaChar, scopeCorpBPs) {
+			continue
+		}
+		bps, err := c.ESI.CorporationBlueprints(corp.viaChar.ID, corp.id)
+		if err != nil {
+			continue
+		}
+		rows := make([]store.BlueprintRow, 0, len(bps))
+		for _, b := range bps {
+			rows = append(rows, store.BlueprintRow{
+				OwnerID: corp.id, ItemID: b.ItemID, TypeID: b.TypeID,
+				LocationID: b.LocationID, Quantity: b.Quantity, Runs: b.Runs,
+				ME: b.ME, TE: b.TE,
+			})
+		}
+		n, _ := c.Store.SaveBlueprints(rows, started)
+		total += n
+	}
+	return c.note("blueprints", started, total, errs)
 }
 
 // ── контракты ────────────────────────────────────────────────────────

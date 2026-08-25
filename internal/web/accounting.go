@@ -40,6 +40,20 @@ type accStock struct {
 	Days      int
 }
 
+// accProd is one job seen from the money side: what it actually cost
+// against what the product is worth now.
+type accProd struct {
+	Name     string
+	Quantity int64
+	Cost     float64
+	Unit     float64
+	Market   float64
+	Delta    float64
+	InWIP    bool
+	When     string
+	Note     string
+}
+
 func (s *Server) handleAccounting(w http.ResponseWriter, r *http.Request) {
 	s.accountingPage(w, r, "")
 }
@@ -53,7 +67,7 @@ func (s *Server) handleAccountingBuild(w http.ResponseWriter, r *http.Request) {
 	if source != "adjusted" {
 		source = "average"
 	}
-	res, err := ledger.New(s.Store, s.ESI).BuildAll(source)
+	res, err := ledger.New(s.Store, s.ESI).WithSDE(s.SDE).BuildAll(source)
 	msg := res.Note
 	if err != nil {
 		msg = "ошибка сборки: " + err.Error()
@@ -82,7 +96,7 @@ type accRecon struct {
 // changes no totals, so being wrong about one is cheap and reversible.
 // A surplus or a shortage moves money, and stays a human decision.
 func (s *Server) handleAccountingRecon(w http.ResponseWriter, r *http.Request) {
-	b := ledger.New(s.Store, s.ESI)
+	b := ledger.New(s.Store, s.ESI).WithSDE(s.SDE)
 	var msg string
 
 	switch r.FormValue("do") {
@@ -263,6 +277,38 @@ func (s *Server) accountingPage(w http.ResponseWriter, r *http.Request, msg stri
 			Owner:   owner, Location: loc, Note: note,
 		})
 	}
+
+	// ── производство: факт против рынка ──
+	prod, err := s.Store.Production(from, to)
+	if err != nil {
+		httpError(w, "production", err)
+		return
+	}
+	var prodIDs []int64
+	for _, p := range prod {
+		prodIDs = append(prodIDs, p.TypeID)
+	}
+	prodNames := ec.Names(prodIDs)
+	made := make([]accProd, 0, len(prod))
+	var madeCost, madeMarket float64
+	for _, p := range prod {
+		market := prices[p.TypeID].Average * float64(p.Quantity)
+		unit := 0.0
+		if p.Quantity > 0 {
+			unit = p.Cost / float64(p.Quantity)
+		}
+		madeCost += p.Cost
+		madeMarket += market
+		made = append(made, accProd{
+			Name: typeName(prodNames, p.TypeID), Quantity: p.Quantity,
+			Cost: p.Cost, Unit: unit, Market: market, Delta: market - p.Cost,
+			InWIP: p.InWIP, When: p.At.Format("02.01 15:04"), Note: p.Note,
+		})
+	}
+	data["Made"] = made
+	data["MadeCost"] = madeCost
+	data["MadeMarket"] = madeMarket
+	data["MadeDelta"] = madeMarket - madeCost
 
 	data["Recon"] = recon
 	data["ReconChecked"] = sum.Checked

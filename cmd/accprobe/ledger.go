@@ -8,6 +8,7 @@ import (
 	"eve-empire/internal/config"
 	"eve-empire/internal/esi"
 	"eve-empire/internal/ledger"
+	"eve-empire/internal/sde"
 	"eve-empire/internal/sso"
 	"eve-empire/internal/store"
 )
@@ -29,7 +30,9 @@ func runLedger(priceSource string, report bool) {
 
 	if priceSource != "" {
 		started := time.Now()
-		res, err := ledger.New(st, ec).BuildAll(priceSource)
+		sdeDB := sde.Open(cfg.SDEPath)
+		defer sdeDB.Close()
+		res, err := ledger.New(st, ec).WithSDE(sdeDB).BuildAll(priceSource)
 		if err != nil {
 			log.Fatalf("сборка реестра: %v", err)
 		}

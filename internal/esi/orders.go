@@ -51,3 +51,14 @@ func (c *Client) CorporationContractItems(characterID, corporationID, contractID
 		fmt.Sprintf("/corporations/%d/contracts/%d/items/", corporationID, contractID), &out)
 	return out, err
 }
+
+// StructureType returns the hull type of a player structure, which is
+// what carries the industry bonuses in the SDE. NPC stations have no
+// bonuses and are not asked about.
+func (c *Client) StructureType(characterID, structureID int64) (int64, error) {
+	var st struct {
+		TypeID int64 `json:"type_id"`
+	}
+	_, err := c.get(characterID, fmt.Sprintf("/universe/structures/%d/", structureID), &st)
+	return st.TypeID, err
+}

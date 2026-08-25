@@ -95,6 +95,7 @@
             <select name="source">
               <option value="лут">лут</option>
               <option value="переработка">переработка</option>
+              <option value="производство">производство</option>
               <option value="добыча">добыча</option>
               <option value="планетарка">планетарка</option>
               <option value="подарок">подарок</option>
@@ -172,6 +173,53 @@
     успешная торговля. Брокерский сбор в разрез по типам не попадает — ESI не
     связывает его ни с ордером, ни со сделкой.
   </p>
+</div>
+
+<h2>Производство за 30 дней</h2>
+<div class="card maxm" style="display:block;">
+  {{if .Made}}
+  <table class="tbl">
+    <thead><tr>
+      <th>Когда</th><th>Продукт</th><th class="r">Штук</th>
+      <th class="r">Обошлось</th><th class="r">За штуку</th>
+      <th class="r">По рынку</th><th class="r">Разница</th>
+    </tr></thead>
+    <tbody>
+    {{range .Made}}
+      <tr>
+        <td class="muted">{{.When}}</td>
+        <td>{{.Name}}{{if .InWIP}} <span class="tag" title="работа не выдана, продукт числится в незавершённом производстве">НЗП</span>{{end}}
+            {{if .Note}}<div class="muted" style="font-size:.78rem;">{{.Note}}</div>{{end}}</td>
+        <td class="r">{{num .Quantity}}</td>
+        <td class="r">{{isk .Cost}}</td>
+        <td class="r">{{isk .Unit}}</td>
+        <td class="r">{{isk .Market}}</td>
+        <td class="r">{{isk .Delta}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+    <tfoot><tr>
+      <th>Итого</th><th></th><th></th>
+      <th class="r">{{isk .MadeCost}}</th><th></th>
+      <th class="r">{{isk .MadeMarket}}</th>
+      <th class="r">{{isk .MadeDelta}}</th>
+    </tr></tfoot>
+  </table>
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    «Обошлось» — <b>факт</b>: реальные цены закупа тех материалов, которые работа
+    съела, плюс сбор за установку. Это то, чего не может знать расчёт на
+    <a class="alink" href="/tools/build">/tools/build</a>: он оценивает план по
+    сегодняшнему рынку. «Разница» — сколько дал бы продукт сверх затрат, до брокера
+    и налога.
+  </p>
+  {{else}}
+  <p style="margin:0;">Проведённых работ пока нет.</p>
+  <p class="muted" style="margin:.5rem 0 0;">
+    Работы, начатые до инвентаризации, не проводятся: их материалы уже отсутствовали
+    в ангаре, когда снимали остатки. Первая же новая работа попадёт сюда с настоящей
+    себестоимостью материалов.
+  </p>
+  {{end}}
 </div>
 
 <h2>Склад по себестоимости</h2>

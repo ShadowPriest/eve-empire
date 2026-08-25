@@ -279,3 +279,100 @@ func TestEstimateSurvivesTransfer(t *testing.T) {
 		t.Errorf("себестоимость после переезда %.2f, ожидалось 500", cost)
 	}
 }
+
+// TestManufactureCarriesCost: списание в производство — не затрата, а
+// перенос. Себестоимость всех материалов плюс сбор за установку обязана
+// оказаться в продукте, иначе каждый запуск выглядел бы убытком, а
+// продажа — сверхприбылью.
+func TestManufactureCarriesCost(t *testing.T) {
+	s := testStore(t)
+	const (
+		tritanium = int64(34)
+		pyerite   = int64(35)
+		product   = int64(180)
+	)
+	at := time.Now().AddDate(0, 0, -1)
+	for _, m := range []struct {
+		id   int64
+		qty  int64
+		cost float64
+		src  string
+	}{{tritanium, 1000, 5000, "m1"}, {pyerite, 500, 3000, "m2"}} {
+		if _, err := s.PostDoc(
+			Doc{Kind: "purchase", OwnerID: owner, At: at, Src: "test", SrcID: m.src},
+			[]Line{{Place: hangar(), TypeID: m.id, Qty: m.qty, CostTotal: m.cost}},
+			nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	wip := PlaceKey{OwnerID: owner, LocationID: station, HolderID: 777, Flag: "WIP"}
+	const fee = 138.0
+	if _, err := s.PostDoc(
+		Doc{Kind: "manufacture", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "job"},
+		[]Line{
+			{Place: hangar(), TypeID: tritanium, Qty: -1000, Scope: "location"},
+			{Place: hangar(), TypeID: pyerite, Qty: -500, Scope: "location"},
+			{Place: wip, TypeID: product, Qty: 10, CostFrom: "doc", CostExtra: fee},
+		}, nil); err != nil {
+		t.Fatalf("работа: %v", err)
+	}
+
+	var qty int64
+	var cost float64
+	if err := s.db.QueryRow(`SELECT l.qty_left, l.cost_left FROM acc_lot l
+		WHERE l.type_id = ? AND l.qty_left > 0`, product).Scan(&qty, &cost); err != nil {
+		t.Fatal(err)
+	}
+	if qty != 10 {
+		t.Fatalf("продукта %d, ожидалось 10", qty)
+	}
+	if !near(cost, 5000+3000+fee) {
+		t.Errorf("себестоимость продукта %.2f, ожидалось %.2f", cost, 5000+3000+fee)
+	}
+	// Материалов на складе больше нет, и ISK из системы не пропали.
+	var matsLeft int64
+	s.db.QueryRow(`SELECT COALESCE(SUM(qty_left),0) FROM acc_lot
+		WHERE type_id IN (?,?)`, tritanium, pyerite).Scan(&matsLeft)
+	if matsLeft != 0 {
+		t.Errorf("материалов осталось %d, работа должна была съесть всё", matsLeft)
+	}
+}
+
+// TestReprocessSplitsByShare: у переработки один вход и несколько
+// выходов, и себестоимость руды надо разделить. Доли задаёт вызывающий
+// (по рыночной стоимости выхода), а проводка обязана раздать ровно то,
+// что списала, без потерь на округлении.
+func TestReprocessSplitsByShare(t *testing.T) {
+	s := testStore(t)
+	const (
+		ore  = int64(1230)
+		trit = int64(34)
+		mex  = int64(36)
+	)
+	if _, err := s.PostDoc(
+		Doc{Kind: "receipt", OwnerID: owner, At: time.Now().AddDate(0, 0, -1),
+			Src: "test", SrcID: "ore"},
+		[]Line{{Place: hangar(), TypeID: ore, Qty: 100, CostTotal: 10_000_000}},
+		nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PostDoc(
+		Doc{Kind: "reprocess", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "rp"},
+		[]Line{
+			{Place: hangar(), TypeID: ore, Qty: -100, Scope: "location"},
+			{Place: hangar(), TypeID: trit, Qty: 5000, CostFrom: "doc", CostShare: 0.4},
+			{Place: hangar(), TypeID: mex, Qty: 300, CostFrom: "doc", CostShare: 0.6},
+		}, nil); err != nil {
+		t.Fatalf("переработка: %v", err)
+	}
+	var got [2]float64
+	s.db.QueryRow(`SELECT cost_left FROM acc_lot WHERE type_id = ?`, trit).Scan(&got[0])
+	s.db.QueryRow(`SELECT cost_left FROM acc_lot WHERE type_id = ?`, mex).Scan(&got[1])
+	if !near(got[0], 4_000_000) || !near(got[1], 6_000_000) {
+		t.Errorf("разделение %v, ожидалось [4000000 6000000]", got)
+	}
+	if !near(got[0]+got[1], 10_000_000) {
+		t.Errorf("сумма выходов %.2f, а списано было 10 000 000", got[0]+got[1])
+	}
+}
