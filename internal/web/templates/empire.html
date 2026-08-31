@@ -1,3 +1,6 @@
+{{define "omgcell"}}<td class="r nowrap">{{if .Raw}}<span class="muted" style="font-size:.72rem;">{{.Disp}}</span>
+  {{if .Expired}}<b class="sev-err">истёк</b>{{else if eq .Class "err"}}<b class="sev-err">{{.Days}}д</b>{{else if eq .Class "warn"}}<b class="sev-warn">{{.Days}}д</b>{{else}}<b>{{.Days}}д</b>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>{{end}}
+
 {{define "content"}}
 {{template "empiretabs" "summary"}}
 
@@ -60,6 +63,22 @@
     </table>
     <p class="knote muted" style="margin-top:.7rem;">
       {{if .IdleQueues}}<span class="sev-err">не обучаются: {{.IdleQueues}}</span>{{else}}все альты учатся{{end}}</p>
+  </div>
+
+  <!-- omega / MCT: hand-entered dates, rows in sidebar order -->
+  <div class="card">
+    <h2>Омега и учебные места <a class="more" href="/settings">изменить →</a></h2>
+    <table>
+      <tr><th>Аккаунт</th><th class="r">Омега</th><th class="r">Уч. 1</th><th class="r">Уч. 2</th></tr>
+      {{range .Groups}}{{if .Key}}
+      <tr>
+        <td>{{.Name}}</td>
+        {{template "omgcell" .Omega.Omega}}
+        {{template "omgcell" .Omega.MCT1}}
+        {{template "omgcell" .Omega.MCT2}}
+      </tr>
+      {{end}}{{end}}
+    </table>
   </div>
 
   <!-- industry lines -->

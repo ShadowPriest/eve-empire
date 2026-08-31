@@ -39,6 +39,25 @@
 {{end}}
 {{end}}
 
+<h2>Омега и учебные места</h2>
+<p class="muted" style="font-size:.8rem; margin:.3rem 0 .5rem;">
+  Даты из окна «Учётная запись» игрового клиента, EVE-время (UTC).
+  Формат: <b style="color:#b9c7da;">2027.03.01 05:20</b> или просто
+  <b style="color:#b9c7da;">2026.11.29</b>; пустое поле — не активно.</p>
+{{range .Groups}}{{if .Key}}
+<form class="omgform" method="post" action="/accounts/omega">
+  <input type="hidden" name="account" value="{{.Key}}">
+  <span class="omgacct">{{.Name}}</span>
+  <label>Омега <input type="text" name="omega" value="{{.Omega.Omega.Disp}}"
+    placeholder="2027.03.01 05:20" autocomplete="off"></label>
+  <label>Уч. место 1 <input type="text" name="mct1" value="{{.Omega.MCT1.Disp}}"
+    placeholder="2026.11.29" autocomplete="off"></label>
+  <label>Уч. место 2 <input type="text" name="mct2" value="{{.Omega.MCT2.Disp}}"
+    placeholder="2026.11.29" autocomplete="off"></label>
+  <button type="submit">Сохранить</button>
+</form>
+{{end}}{{end}}
+
 <h2>Язык данных EVE</h2>
 <form method="post" action="/settings/language" class="frow" style="margin:.4rem 0 0;">
   <select name="language" id="langsel">

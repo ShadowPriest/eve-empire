@@ -1056,6 +1056,18 @@
     color: #e8eef7; padding: .25rem .5rem; font: inherit; font-size: .8rem; width: 190px;
   }
 
+  /* омега и учебные места: строка-форма на аккаунт в настройках */
+  .omgform { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .35rem 0; }
+  .omgform .omgacct { flex: 0 0 160px; font-size: .85rem; color: #e8eef7; }
+  .omgform label {
+    display: inline-flex; align-items: center; gap: .35rem;
+    font-size: .75rem; color: #7b8aa0;
+  }
+  .omgform input {
+    background: #0b0e14; border: 1px solid #2a3a55; border-radius: 6px;
+    color: #e8eef7; padding: .25rem .5rem; font: inherit; font-size: .8rem; width: 150px;
+  }
+
   /* скорость обучения рядом с полосами прогресса */
   .rate { font-style: normal; color: #7b8aa0; font-size: .72rem; white-space: nowrap; }
   .skrow .rate { margin-left: .3rem; }
@@ -1074,6 +1086,11 @@
   .acct .caret::before { content: "▾"; }
   .group.collapsed .acct .caret { transform: rotate(-90deg); }
   .acct .acnt { margin-left: auto; color: #55657d; font-size: .7rem; font-weight: 400; }
+  /* остаток омеги в заголовке аккаунта; цвета — как у sev-* */
+  .acct .omg { margin-left: auto; flex: none; color: #55657d; font-weight: 400; cursor: help; }
+  .acct .omg.warn { color: #e0b25f; }
+  .acct .omg.err { color: #e06c6c; }
+  .acct .omg + .acnt { margin-left: .5rem; }
   .acctrow { display: none; }
   .group.collapsed .char { display: none; }
   .group.collapsed .acctrow {
@@ -1505,7 +1522,8 @@
       {{range .Groups}}
       <div class="group" data-account="{{.Key}}">
         <div class="acct" draggable="true" title="клик — свернуть аккаунт, перетаскивание — порядок">
-          <i class="caret"></i>{{.Name}}<span class="acnt">{{len .Chars}}</span>
+          <i class="caret"></i>{{.Name}}{{if .Omega.Any}}<span class="omg {{.Omega.Class}}"
+            title="{{.Omega.Title}}">{{.Omega.Label}}</span>{{end}}<span class="acnt">{{len .Chars}}</span>
         </div>
         {{/* Свёрнутый вид: ряд портретов по три — столько же, сколько
              слотов у аккаунта в игре. Пустые слоты рисуем заглушками,

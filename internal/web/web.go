@@ -319,6 +319,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /characters/{id}/mail", s.handleMail)
 	mux.HandleFunc("GET /api/mail/{id}/{mail}", s.handleMailJSON)
 	mux.HandleFunc("POST /characters/{id}/account", s.handleSetAccount)
+	mux.HandleFunc("POST /accounts/omega", s.handleSetAccountOmega)
 	mux.HandleFunc("POST /characters/{id}/tags", s.handleSetTags)
 	mux.HandleFunc("POST /characters/{id}/delete", s.handleDelete)
 	mux.HandleFunc("GET /corporations/{id}/info", s.handleCorpInfo)
@@ -349,6 +350,7 @@ func (s *Server) esiFor(r *http.Request) (*esi.Client, *atomic.Bool) {
 type accountGroup struct {
 	Key   string // raw account value ("" for unassigned) — used by drag&drop
 	Name  string // display title
+	Omega omegaView
 	Chars []sideChar
 }
 
@@ -527,6 +529,16 @@ func (s *Server) shell(ec *esi.Client, selectedID int64, section string) (map[st
 		allTags = append(allTags, t)
 	}
 	sort.Strings(allTags)
+
+	// Hand-entered omega / MCT dates, shown on the group headers.
+	if omegas, err := s.Store.AccountOmegas(); err == nil {
+		now := time.Now().UTC()
+		for i := range groups {
+			if o, ok := omegas[groups[i].Key]; ok && groups[i].Key != "" {
+				groups[i].Omega = newOmegaView(o, now)
+			}
+		}
+	}
 
 	var selected *store.Character
 	for i := range chars {

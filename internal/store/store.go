@@ -158,6 +158,17 @@ CREATE TABLE IF NOT EXISTS mining_ledger (
     quantity     INTEGER NOT NULL,
     price        REAL NOT NULL DEFAULT 0, -- ISK per unit, Jita average that day
     PRIMARY KEY (character_id, day, system_id, type_id)
+);
+-- omega / MCT expiry per account label. ESI has no subscription
+-- endpoint, so the dates are typed in by hand from the game client.
+-- Kept apart from account_order: that table is wiped and rebuilt on
+-- every sidebar reorder. Dates are 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD'
+-- in EVE time (UTC); empty string = not active / unknown.
+CREATE TABLE IF NOT EXISTS account_omega (
+    account     TEXT PRIMARY KEY,
+    omega_until TEXT NOT NULL DEFAULT '',
+    mct1_until  TEXT NOT NULL DEFAULT '',
+    mct2_until  TEXT NOT NULL DEFAULT ''
 )`)
 	if err != nil {
 		return err
@@ -572,6 +583,52 @@ func (s *Store) SaveSidebarOrder(groups []SidebarGroup) error {
 // SetAccount updates the user-assigned account label of a character.
 func (s *Store) SetAccount(characterID int64, account string) error {
 	_, err := s.db.Exec(`UPDATE characters SET account = ? WHERE character_id = ?`, account, characterID)
+	return err
+}
+
+// AccountOmega holds the hand-entered subscription dates of one account:
+// omega itself plus the two extra training slots (MCT certificates).
+// Dates are 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD' in EVE time (UTC);
+// empty = not active / unknown.
+type AccountOmega struct {
+	Account    string
+	OmegaUntil string
+	MCT1Until  string
+	MCT2Until  string
+}
+
+// AccountOmegas returns the stored subscription dates keyed by account label.
+func (s *Store) AccountOmegas() (map[string]AccountOmega, error) {
+	rows, err := s.db.Query(`SELECT account, omega_until, mct1_until, mct2_until FROM account_omega`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]AccountOmega{}
+	for rows.Next() {
+		var o AccountOmega
+		if err := rows.Scan(&o.Account, &o.OmegaUntil, &o.MCT1Until, &o.MCT2Until); err != nil {
+			return nil, err
+		}
+		out[o.Account] = o
+	}
+	return out, rows.Err()
+}
+
+// SetAccountOmega upserts the subscription dates of one account; all
+// three dates empty removes the row.
+func (s *Store) SetAccountOmega(o AccountOmega) error {
+	if o.OmegaUntil == "" && o.MCT1Until == "" && o.MCT2Until == "" {
+		_, err := s.db.Exec(`DELETE FROM account_omega WHERE account = ?`, o.Account)
+		return err
+	}
+	_, err := s.db.Exec(`INSERT INTO account_omega (account, omega_until, mct1_until, mct2_until)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(account) DO UPDATE SET
+			omega_until = excluded.omega_until,
+			mct1_until  = excluded.mct1_until,
+			mct2_until  = excluded.mct2_until`,
+		o.Account, o.OmegaUntil, o.MCT1Until, o.MCT2Until)
 	return err
 }
 
