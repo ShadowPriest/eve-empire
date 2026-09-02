@@ -12,23 +12,29 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
+# .env — дев-приложение, поверх него обязательно ложится .env.prod с прод-client_id.
+# Без этой перекладки на роутер уехало бы дев-приложение, и прод потерял бы токены.
 $env_ = @{}
-foreach ($line in Get-Content .env) {
-    if ($line -match '^\s*([A-Z_]+)\s*=\s*(.*)$') { $env_[$matches[1]] = $matches[2].Trim() }
+foreach ($file in '.env', '.env.prod') {
+    if (-not (Test-Path $file)) { throw "нет файла $file" }
+    foreach ($line in Get-Content $file) {
+        if ($line -match '^\s*([A-Z_]+)\s*=\s*(.*)$') { $env_[$matches[1]] = $matches[2].Trim() }
+    }
 }
 foreach ($k in 'EVE_CLIENT_ID', 'EVE_CLIENT_SECRET', 'ENCRYPTION_KEY') {
-    if (-not $env_[$k]) { throw "в .env нет $k" }
+    if (-not $env_[$k]) { throw "не задан $k (.env / .env.prod)" }
 }
 
 # RouterOS: значение в кавычках, экранируются " и \
 function Q([string]$v) { '"' + ($v -replace '\\', '\\\\' -replace '"', '\\"') + '"' }
 
+# EVE_SCOPES здесь намеренно нет: список скоупов знает сам код
+# (config.defaultScopes), а переопределение длинным набором ломает логин.
 $envs = [ordered]@{
     EVE_CLIENT_ID     = $env_['EVE_CLIENT_ID']
     EVE_CLIENT_SECRET = $env_['EVE_CLIENT_SECRET']
     ENCRYPTION_KEY    = $env_['ENCRYPTION_KEY']
     EVE_CALLBACK_URL  = $Callback
-    EVE_SCOPES        = $env_['EVE_SCOPES']
     ESI_USER_AGENT    = if ($env_['ESI_USER_AGENT']) { $env_['ESI_USER_AGENT'] } else { 'eve-empire/0.1' }
     DB_PATH           = '/data/eve-empire.db'
     SDE_PATH          = '/data/sde.db'

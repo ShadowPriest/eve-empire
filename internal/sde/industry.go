@@ -8,6 +8,7 @@ package sde
 
 import (
 	"database/sql"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +25,29 @@ type Recipe struct {
 	Activity      string // manufacturing | reaction
 	Time          int64  // seconds per run
 	MaxRuns       int64
+}
+
+// MaterialQty is how much of one material a job really consumes.
+//
+// ПОРЯДОК ВАЖЕН, сверено с клиентом (ARCHITECTURE.md, «Формулы EVE»):
+// бонус корпуса идёт ОТДЕЛЬНЫМ множителем после ME, округление одно и в
+// самом конце, а пол «не ниже числа прогонов» — самым последним. Именно
+// поэтому игра просит 6 618 Robotics там, где арифметика даёт 5 897.
+//
+// У реакций ME чертежа не действует вовсе и бонуса корпуса на материалы
+// нет — расход двигают только риги структуры, которые здесь не учтены.
+func MaterialQty(base, runs int64, me int, reaction bool, matMul float64) int64 {
+	if reaction {
+		return base * runs
+	}
+	if matMul <= 0 {
+		matMul = 1
+	}
+	v := math.Ceil(float64(base)*float64(runs)*(1-float64(me)/100)*matMul - 1e-9)
+	if v < float64(runs) {
+		v = float64(runs)
+	}
+	return int64(v)
 }
 
 // IsReaction reports whether material efficiency applies. Reactions

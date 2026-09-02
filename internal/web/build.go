@@ -16,7 +16,6 @@ package web
 
 import (
 	"fmt"
-	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -472,17 +471,7 @@ func (s *Server) handleBuildCalc(w http.ResponseWriter, r *http.Request) {
 // Reactions have no blueprint ME and no hull material bonus; only rigs
 // move them, and rigs are not modelled here.
 func buildQty(base int64, runs int64, me int, reaction bool, matMul float64) int64 {
-	if reaction {
-		return base * runs
-	}
-	if matMul <= 0 {
-		matMul = 1
-	}
-	v := math.Ceil(float64(base)*float64(runs)*(1-float64(me)/100)*matMul - 1e-9)
-	if v < float64(runs) {
-		v = float64(runs)
-	}
-	return int64(v)
+	return sde.MaterialQty(base, runs, me, reaction, matMul)
 }
 
 // ownedBlueprints finds the picked print among the characters' own

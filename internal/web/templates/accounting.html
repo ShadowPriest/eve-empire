@@ -1,0 +1,370 @@
+{{define "content"}}
+<h1>Учёт</h1>
+
+{{if .Message}}
+<div class="card maxm" style="display:block;">
+  <p style="margin:0;">{{.Message}}</p>
+</div>
+{{end}}
+
+<div class="card maxm" style="display:block;">
+  {{if .Opened}}
+  <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:.8rem;">
+    <div><div class="muted" style="font-size:.8rem;">склад по себестоимости</div>
+         <b style="font-size:1.15rem;">{{isk .Att.StockCost}}</b></div>
+    <div><div class="muted" style="font-size:.8rem;">живых партий</div>
+         <b style="font-size:1.15rem;">{{num .Att.Lots}}</b></div>
+    <div><div class="muted" style="font-size:.8rem;">документов</div>
+         <b style="font-size:1.15rem;">{{num .Att.Documents}}</b></div>
+    <div><div class="muted" style="font-size:.8rem;">на оценке, не по факту</div>
+         <b style="font-size:1.15rem;">{{printf "%.0f" .EstimateShare}}%</b>
+         <span class="muted">({{isk .Att.EstimateCost}})</span></div>
+  </div>
+  <p class="muted" style="margin:0 0 .8rem;">
+    Оценочная часть — то, что лежало на складе раньше, чем начал собираться кошелёк:
+    её цена взята с рынка, а не из закупки. Она будет таять сама по мере того, как
+    старый запас расходуется, а новый приходит с настоящей ценой.
+  </p>
+  {{else}}
+  <p style="margin:0 0 .8rem;">
+    Реестр пуст. Инвентаризация снимет текущее имущество всех альтов и корпораций
+    и заведёт начальные партии. То, что куплено за последние недели, будет оценено
+    по <b>фактической цене закупки</b>, остальное — по рынку с пометкой «оценка».
+  </p>
+  {{end}}
+  <form method="post" action="/accounting/build" style="margin:0;">
+    <button type="submit" class="btnlink">
+      {{if .Opened}}Дособрать реестр{{else}}Провести инвентаризацию империи{{end}}
+    </button>
+    <span class="muted" style="margin-left:.6rem;font-size:.85rem;">
+      повторный запуск безопасен: уже проведённые документы не дублируются
+    </span>
+  </form>
+</div>
+
+<h2>Сверка с действительностью</h2>
+<div class="card maxm" style="display:block;">
+  <p style="margin:0 0 .6rem;">
+    Сопоставлено <b>{{num .ReconChecked}}</b> сочетаний «владелец · локация · тип»,
+    расходится <b>{{num .ReconDiffs}}</b>.
+    {{if .OnMarketQty}}На витрине {{num .OnMarketQty}} ед.{{end}}
+    {{if .TransitQty}} В пути под обёрткой {{num .TransitQty}} ед.{{end}}
+    {{if .SafetyQty}} В asset safety {{num .SafetyQty}} ед.{{end}}
+  </p>
+  <p class="muted" style="margin:0 0 .8rem;font-size:.85rem;">
+    Сверяется <b>ассеты + витрина</b> против остатка реестра. Груз под чужой
+    Plastic Wrap исключён: он лежит у перевозчика, а принадлежит отправителю.
+    Контракты, колонии и незавершённое производство пока не учитываются — по ним
+    расхождение будет ложным.
+  </p>
+
+  {{if .Recon}}
+  {{if .ReconTransfers}}
+  <form method="post" action="/accounting/recon" style="margin:0 0 1rem;">
+    <input type="hidden" name="do" value="transfers">
+    <button type="submit" class="btnlink">Провести перемещения ({{num .ReconTransfers}})</button>
+    <span class="muted" style="margin-left:.6rem;font-size:.85rem;">
+      себестоимость переезжает вместе с товаром, итоги не меняются
+    </span>
+  </form>
+  {{end}}
+
+  <table class="tbl">
+    <thead><tr>
+      <th>Что</th><th>Тип</th><th class="r">Штук</th>
+      <th>Откуда</th><th>Куда</th><th></th>
+    </tr></thead>
+    <tbody>
+    {{range .Recon}}
+      <tr>
+        <td>{{if eq .Kind "transfer"}}перемещение{{else if eq .Kind "receipt"}}<b>излишек</b>{{else}}<b>недостача</b>{{end}}
+            {{if .Note}}<span class="muted" style="font-size:.8rem;">— {{.Note}}</span>{{end}}</td>
+        <td>{{.Name}}</td>
+        <td class="r">{{num .Qty}}</td>
+        <td class="muted">{{if eq .Kind "receipt"}}—{{else}}{{.FromWho}}<br><span style="font-size:.8rem;">{{.From}}</span>{{end}}</td>
+        <td class="muted">{{if eq .Kind "writeoff"}}—{{else}}{{.ToWho}}<br><span style="font-size:.8rem;">{{.To}}</span>{{end}}</td>
+        <td>
+          {{if ne .Kind "transfer"}}
+          <form method="post" action="/accounting/recon" style="display:flex;gap:.3rem;align-items:center;margin:0;">
+            <input type="hidden" name="do" value="{{if eq .Kind "receipt"}}receipt{{else}}writeoff{{end}}">
+            <input type="hidden" name="owner" value="{{.Owner}}">
+            <input type="hidden" name="loc" value="{{.Location}}">
+            <input type="hidden" name="type" value="{{.TypeID}}">
+            <input type="hidden" name="qty" value="{{.Qty}}">
+            {{if eq .Kind "receipt"}}
+            <select name="source">
+              <option value="лут">лут</option>
+              <option value="переработка">переработка</option>
+              <option value="производство">производство</option>
+              <option value="добыча">добыча</option>
+              <option value="планетарка">планетарка</option>
+              <option value="подарок">подарок</option>
+              <option value="прочее">прочее</option>
+            </select>
+            <select name="price">
+              <option value="zero">цена 0</option>
+              <option value="market">по рынку (оценка)</option>
+            </select>
+            <button type="submit" class="btnlink">Оприходовать</button>
+            {{else}}
+            <select name="source">
+              <option value="потеря">потеря</option>
+              <option value="передано наружу">передано наружу</option>
+              <option value="ушло в работу">ушло в работу</option>
+              <option value="прочее">прочее</option>
+            </select>
+            <button type="submit" class="btnlink">Списать</button>
+            {{end}}
+          </form>
+          {{end}}
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p style="margin:0;">Расхождений нет — реестр сходится с действительностью.</p>
+  {{end}}
+</div>
+
+<h2>Маржа за 30 дней</h2>
+<div class="card maxm" style="display:block;">
+  {{if .Rows}}
+  <table class="tbl">
+    <thead><tr>
+      <th>Тип</th><th class="r">Сделок</th><th class="r">Штук</th>
+      <th class="r">Выручка</th><th class="r">Себестоимость</th>
+      <th class="r">Налог</th><th class="r">Прибыль</th><th class="r">Маржа</th>
+    </tr></thead>
+    <tbody>
+    {{range .Rows}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td class="r">{{num .Sales}}</td>
+        <td class="r">{{num .Quantity}}</td>
+        <td class="r">{{isk .Revenue}}</td>
+        <td class="r">{{isk .COGS}}</td>
+        <td class="r">{{isk .Tax}}</td>
+        <td class="r">{{isk .Profit}}</td>
+        <td class="r">{{printf "%.1f%%" .Margin}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+    <tfoot><tr>
+      <th>Итого</th><th></th><th></th>
+      <th class="r">{{isk .TotRevenue}}</th>
+      <th class="r">{{isk .TotCOGS}}</th>
+      <th class="r">{{isk .TotTax}}</th>
+      <th class="r">{{isk .TotProfit}}</th><th></th>
+    </tr></tfoot>
+  </table>
+  {{else}}
+  <p style="margin:0;">Продаж в реестре пока нет.</p>
+  <p class="muted" style="margin:.5rem 0 0;">
+    Это нормально сразу после инвентаризации: книги открыты сегодняшним числом, и
+    сделки, которые случились раньше, уже учтены в остатках — второй раз их
+    проводить нельзя. Маржа появится с первой же новой продажи, и у неё будет
+    настоящая себестоимость, а не рыночная оценка.
+  </p>
+  {{end}}
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    Здесь только <b>реализованная</b> прибыль — по проданному. Переоценка того, что
+    ещё лежит на складе, сюда намеренно не входит: иначе рост цен выглядел бы как
+    успешная торговля. Брокерский сбор в разрез по типам не попадает — ESI не
+    связывает его ни с ордером, ни со сделкой.
+  </p>
+</div>
+
+<h2>Производство за 30 дней</h2>
+<div class="card maxm" style="display:block;">
+  {{if .Made}}
+  <table class="tbl">
+    <thead><tr>
+      <th>Когда</th><th>Продукт</th><th class="r">Штук</th>
+      <th class="r">Обошлось</th><th class="r">За штуку</th>
+      <th class="r">По рынку</th><th class="r">Разница</th>
+    </tr></thead>
+    <tbody>
+    {{range .Made}}
+      <tr>
+        <td class="muted">{{.When}}</td>
+        <td>{{.Name}}{{if .InWIP}} <span class="tag" title="работа не выдана, продукт числится в незавершённом производстве">НЗП</span>{{end}}
+            {{if .Note}}<div class="muted" style="font-size:.78rem;">{{.Note}}</div>{{end}}</td>
+        <td class="r">{{num .Quantity}}</td>
+        <td class="r">{{isk .Cost}}</td>
+        <td class="r">{{isk .Unit}}</td>
+        <td class="r">{{isk .Market}}</td>
+        <td class="r">{{isk .Delta}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+    <tfoot><tr>
+      <th>Итого</th><th></th><th></th>
+      <th class="r">{{isk .MadeCost}}</th><th></th>
+      <th class="r">{{isk .MadeMarket}}</th>
+      <th class="r">{{isk .MadeDelta}}</th>
+    </tr></tfoot>
+  </table>
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    «Обошлось» — <b>факт</b>: реальные цены закупа тех материалов, которые работа
+    съела, плюс сбор за установку. Это то, чего не может знать расчёт на
+    <a class="alink" href="/tools/build">/tools/build</a>: он оценивает план по
+    сегодняшнему рынку. «Разница» — сколько дал бы продукт сверх затрат, до брокера
+    и налога.
+  </p>
+  {{else}}
+  <p style="margin:0;">Проведённых работ пока нет.</p>
+  <p class="muted" style="margin:.5rem 0 0;">
+    Работы, начатые до инвентаризации, не проводятся: их материалы уже отсутствовали
+    в ангаре, когда снимали остатки. Первая же новая работа попадёт сюда с настоящей
+    себестоимостью материалов.
+  </p>
+  {{end}}
+</div>
+
+<h2>Требует внимания</h2>
+<div class="card maxm" style="display:block;">
+  <ul style="margin:0;padding-left:1.1rem;">
+    {{if .ReconDiffs}}<li>Расхождений сверки: <b>{{num .ReconDiffs}}</b> — разобрать выше.</li>{{end}}
+    {{if .Att.EstimateLots}}<li>Партий с оценочной ценой: <b>{{num .Att.EstimateLots}}</b>
+      на {{isk .Att.EstimateCost}} — это {{printf "%.0f" .EstimateShare}}% склада.
+      Их цена взята с рынка, а не из закупки.</li>{{end}}
+    {{if .FeesUnmatchedN}}<li>Брокерских сборов без ордера: <b>{{num .FeesUnmatchedN}}</b>
+      на {{isk .FeesUnmatched}} — ESI не связывает сбор ни с ордером, ни со сделкой,
+      и остаётся только совпадение по времени.</li>{{end}}
+    {{if .SafetyQty}}<li>В asset safety: <b>{{num .SafetyQty}}</b> ед. — это ваше добро,
+      но у него есть срок и сбор за выдачу.</li>{{end}}
+    {{if .TransitQty}}<li>Под чужой обёрткой в пути: <b>{{num .TransitQty}}</b> ед.</li>{{end}}
+  </ul>
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    Пусто в этом списке — не признак порядка сам по себе: сверка пока не знает про
+    контракты, колонии и незавершённое производство чужих работ.
+  </p>
+</div>
+
+<h2>Закрытие периода</h2>
+<div class="card maxm" style="display:block;">
+  {{if .ClosedBefore}}
+  <p style="margin:0 0 .6rem;">Книги закрыты до <b>{{.ClosedBefore}}</b>: документы этой
+    датой и раньше не проводятся.</p>
+  <form method="post" action="/accounting/close" style="margin:0;">
+    <input type="hidden" name="do" value="open">
+    <button type="submit" class="btnlink">Открыть обратно</button>
+  </form>
+  {{else}}
+  <p style="margin:0 0 .6rem;">Период не закрыт — задним числом проводится что угодно.</p>
+  <form method="post" action="/accounting/close" style="margin:0;display:flex;gap:.4rem;align-items:center;">
+    <input type="date" name="date" value="{{.CloseDefault}}">
+    <button type="submit" class="btnlink">Закрыть период</button>
+  </form>
+  {{end}}
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    Закрытый период не правится задним числом: поправки идут новым документом. Без
+    этого однажды вчерашний отчёт перестанет совпадать с сегодняшним, и доверия к
+    цифрам не будет. Сбор данных и сверка продолжают работать как обычно — отказ
+    касается только проводки документов старой датой.
+  </p>
+</div>
+
+<h2>Капитал за 30 дней</h2>
+<div class="card maxm" style="display:block;">
+  <table class="tbl">
+    <tbody>
+      <tr><td>ISK на кошельках</td>
+          <td class="r">{{isk .Cap.ISKFrom}}</td><td class="r">→ {{isk .Cap.ISKTo}}</td>
+          <td class="r"><b>{{isk .Cap.DeltaISK}}</b></td></tr>
+      <tr><td>Склад по себестоимости</td>
+          <td class="r">{{isk .Cap.StockFrom}}</td><td class="r">→ {{isk .Cap.StockTo}}</td>
+          <td class="r"><b>{{isk .Cap.DeltaStock}}</b></td></tr>
+      {{if .Cap.Opening}}
+      <tr><td class="muted">из них начальные остатки — вклад, не заработок</td>
+          <td></td><td></td><td class="r muted">{{isk .Cap.Opening}}</td></tr>
+      {{end}}
+      <tr><td>Движение ISK, проведённое реестром</td>
+          <td></td><td></td><td class="r">{{isk .Cap.Explained}}</td></tr>
+      <tr><td><b>Невязка</b> — движение ISK, которого реестр не знает</td>
+          <td></td><td></td><td class="r"><b>{{isk .Cap.Residual}}</b></td></tr>
+      <tr><td><b>Прибыль реестра</b></td>
+          <td></td><td></td><td class="r"><b>{{isk .Cap.Profit}}</b></td></tr>
+    </tbody>
+  </table>
+  <p class="muted" style="margin:.7rem 0 .8rem;font-size:.85rem;">
+    Тождество простое: ISK плюс склад — это весь капитал, и его изменение обязано
+    равняться прибыли. Сходиться оно и не должно, пока реестр знает только рыночные
+    сделки: баунти, награды, продажа PLEX и переводы между своими в него не попадают.
+    Поэтому здесь не вердикт «сошлось», а <b>невязка</b> и её разбор — сразу видно,
+    чего именно не хватает.
+  </p>
+
+  <table class="tbl">
+    <thead><tr><th>Вид движения ISK</th><th class="r">Сумма</th><th>В реестре</th></tr></thead>
+    <tbody>
+    {{range .CapKinds}}
+      <tr>
+        <td>{{.RefType}}</td>
+        <td class="r">{{isk .Amount}}</td>
+        <td>{{if .Posted}}<span class="tag">проведено</span>{{else}}<span class="muted">нет</span>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if .CapKindsMore}}<p class="muted" style="margin:.6rem 0 0;">… ещё {{num .CapKindsMore}} видов</p>{{end}}
+</div>
+
+{{if .Stages}}
+<h2>Вклад по переделам</h2>
+<div class="card maxm" style="display:block;">
+  <table class="tbl">
+    <thead><tr><th>Передел</th><th class="r">Документов</th>
+      <th class="r">Вошло по рынку</th><th class="r">Вышло по рынку</th>
+      <th class="r">Вклад</th></tr></thead>
+    <tbody>
+    {{range .Stages}}
+      <tr><td>{{.Name}}</td><td class="r">{{num .Docs}}</td>
+        <td class="r">{{isk .InMkt}}</td><td class="r">{{isk .OutMkt}}</td>
+        <td class="r">{{isk .Added}}</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    Без этого разреза вся прибыль цепочки «копал → перерабатывал → строил → продал»
+    падает на последний шаг, и «выгодно ли было производить» остаётся без ответа.
+    Считается по рыночной оценке на момент движения, а не по себестоимости.
+  </p>
+</div>
+{{end}}
+
+<h2>Склад по себестоимости</h2>
+<div class="card maxm" style="display:block;">
+  {{if .Stock}}
+  <table class="tbl">
+    <thead><tr>
+      <th>Тип</th><th>Где</th><th class="r">Штук</th>
+      <th class="r">Себестоимость</th><th class="r">По рынку</th>
+      <th class="r">Разница</th><th class="r">Лежит, дней</th>
+    </tr></thead>
+    <tbody>
+    {{range .Stock}}
+      <tr>
+        <td>{{.Name}}{{if .Estimated}} <span class="tag" title="цена взята с рынка, а не из закупки">оценка</span>{{end}}</td>
+        <td class="muted">{{.Where}}</td>
+        <td class="r">{{num .Quantity}}</td>
+        <td class="r">{{isk .Cost}}</td>
+        <td class="r">{{isk .Market}}</td>
+        <td class="r">{{isk .Delta}}</td>
+        <td class="r">{{num .Days}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{if .StockMore}}<p class="muted" style="margin:.6rem 0 0;">… ещё {{num .StockMore}} позиций</p>{{end}}
+  <p class="muted" style="margin:.7rem 0 0;font-size:.85rem;">
+    «Разница» — что даст продажа сверх себестоимости, до брокера и налога. У позиций
+    с пометкой «оценка» себестоимость взята с рынка, поэтому разница у них около нуля
+    и ни о чём не говорит, пока их цена не уточнится.
+  </p>
+  {{else}}
+  <p style="margin:0;">Склад пуст — реестр ещё не заполнен.</p>
+  {{end}}
+</div>
+{{end}}

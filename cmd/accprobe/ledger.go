@@ -1,0 +1,266 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"time"
+
+	"eve-empire/internal/config"
+	"eve-empire/internal/esi"
+	"eve-empire/internal/ledger"
+	"eve-empire/internal/sde"
+	"eve-empire/internal/sso"
+	"eve-empire/internal/store"
+)
+
+// runLedger builds the ledger from collected history and prints the
+// stage-1 reports. A dev helper: the same calls sit behind the page.
+func runLedger(priceSource string, report bool) {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	st, err := store.Open(cfg.DBPath, cfg.EncryptionKey)
+	if err != nil {
+		log.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+	ec := esi.New(sso.New(cfg.ClientID, cfg.ClientSecret, cfg.CallbackURL, cfg.Scopes, cfg.UserAgent), st, cfg.UserAgent)
+	ec.SetLanguage(st.Setting("language"))
+
+	if priceSource != "" {
+		started := time.Now()
+		sdeDB := sde.Open(cfg.SDEPath)
+		defer sdeDB.Close()
+		res, err := ledger.New(st, ec).WithSDE(sdeDB).BuildAll(priceSource)
+		if err != nil {
+			log.Fatalf("сборка реестра: %v", err)
+		}
+		fmt.Println("СБОРКА за", time.Since(started).Round(time.Millisecond))
+		fmt.Println("  документов:", res.Documents, " партий:", res.Lots,
+			" пропущено (уже проведено):", res.Skipped)
+		fmt.Println(" ", res.Note)
+		fmt.Println()
+	}
+	if !report {
+		return
+	}
+
+	a, err := st.Attention()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("РЕЕСТР: документов %d, живых партий %d, склад по себестоимости %s\n",
+		a.Documents, a.Lots, isk(a.StockCost))
+	fmt.Printf("  из них оценочных партий %d на %s\n\n", a.EstimateLots, isk(a.EstimateCost))
+
+	from := time.Now().AddDate(0, 0, -30)
+	to := time.Now().Add(time.Hour)
+
+	margins, err := st.Margins(from, to)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("МАРЖА ЗА 30 ДНЕЙ (реализованная, без переоценки остатка)")
+	if len(margins) == 0 {
+		fmt.Println("  продаж в реестре нет")
+	}
+	var ids []int64
+	for _, m := range margins {
+		ids = append(ids, m.TypeID)
+	}
+	names := ec.Names(ids)
+	var revenue, cogs, tax, profit float64
+	fmt.Printf("  %-34s %6s %14s %14s %12s %8s\n", "тип", "сделок", "выручка", "себестоимость", "прибыль", "маржа")
+	for i, m := range margins {
+		revenue += m.Revenue
+		cogs += m.COGS
+		tax += m.Tax
+		profit += m.Profit()
+		if i < 12 {
+			fmt.Printf("  %-34s %6d %14s %14s %12s %7.1f%%\n",
+				trim34(names[m.TypeID]), m.Sales, isk(m.Revenue), isk(m.COGS),
+				isk(m.Profit()), m.MarginPct())
+		}
+	}
+	if len(margins) > 12 {
+		fmt.Printf("  … ещё %d типов\n", len(margins)-12)
+	}
+	fmt.Printf("  ИТОГО выручка %s, себестоимость %s, налог %s, прибыль %s\n\n",
+		isk(revenue), isk(cogs), isk(tax), isk(profit))
+
+	stock, err := st.Stock()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("СКЛАД ПО СЕБЕСТОИМОСТИ (топ-10 позиций)")
+	ids = ids[:0]
+	for _, s := range stock {
+		ids = append(ids, s.TypeID)
+	}
+	names = ec.Names(ids)
+	for i, s := range stock {
+		if i >= 10 {
+			break
+		}
+		mark := ""
+		if s.Estimated {
+			mark = " (оценка)"
+		}
+		where := s.HolderName
+		if where == "" {
+			where = "ангар"
+		}
+		fmt.Printf("  %-34s %10d  %14s  %s%s\n",
+			trim34(names[s.TypeID]), s.Quantity, isk(s.Cost), where, mark)
+	}
+}
+
+func trim34(s string) string {
+	if s == "" {
+		return "—"
+	}
+	r := []rune(s)
+	if len(r) > 34 {
+		return string(r[:33]) + "…"
+	}
+	return s
+}
+
+// isk formats ISK the way the game does: thousands apart, two decimals
+// only when the number is small enough for them to mean anything.
+func isk(v float64) string {
+	switch a := abs(v); {
+	case a >= 1e9:
+		return fmt.Sprintf("%.2f млрд", v/1e9)
+	case a >= 1e6:
+		return fmt.Sprintf("%.2f млн", v/1e6)
+	case a >= 1e3:
+		return fmt.Sprintf("%.1f тыс", v/1e3)
+	default:
+		return fmt.Sprintf("%.2f", v)
+	}
+}
+
+func abs(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// runRecon prints what the ledger and reality disagree about.
+func runRecon() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	st, err := store.Open(cfg.DBPath, cfg.EncryptionKey)
+	if err != nil {
+		log.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+	ec := esi.New(sso.New(cfg.ClientID, cfg.ClientSecret, cfg.CallbackURL, cfg.Scopes, cfg.UserAgent), st, cfg.UserAgent)
+	ec.SetLanguage(st.Setting("language"))
+
+	sum, err := st.Reconcile()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if sum.NoAssets {
+		fmt.Println("снимков имущества нет — сверять не с чем")
+		return
+	}
+	fmt.Printf("СВЕРКА: сопоставлено %d сочетаний (владелец, локация, тип), расхождений %d\n",
+		sum.Checked, len(sum.Lines))
+	fmt.Printf("  на витрине %d ед., в пути под обёрткой %d ед., в asset safety %d ед.\n\n",
+		sum.OnMarketQty, sum.TransitQty, sum.SafetyQty)
+
+	var ids []int64
+	for _, l := range sum.Lines {
+		ids = append(ids, l.TypeID, l.LocationID)
+	}
+	names := ec.Names(ids)
+	shown := 0
+	for _, l := range sum.Lines {
+		if shown >= 20 {
+			fmt.Printf("  … ещё %d\n", len(sum.Lines)-shown)
+			break
+		}
+		shown++
+		sign := "недостача"
+		if l.Surplus() {
+			sign = "излишек  "
+		}
+		fmt.Printf("  %s %-30s %+8d   ассеты %d, витрина %d, реестр %d   @ %s\n",
+			sign, trim34(names[l.TypeID]), l.Diff, l.InAssets, l.OnMarket, l.Ledger,
+			trim34(names[l.LocationID]))
+	}
+}
+
+// runCapital prints the balance identity and what it cannot explain.
+func runCapital(days int) {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	st, err := store.Open(cfg.DBPath, cfg.EncryptionKey)
+	if err != nil {
+		log.Fatalf("store: %v", err)
+	}
+	defer st.Close()
+
+	opened, err := st.OpeningTimes()
+	if err != nil {
+		log.Fatal(err)
+	}
+	from := time.Now().AddDate(0, 0, -30)
+	if days > 0 {
+		from = time.Now().AddDate(0, 0, -days)
+	} else {
+		for _, t := range opened {
+			from = t
+		}
+	}
+	to := time.Now().Add(time.Minute)
+
+	c, err := st.Capital(from, to)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("КАПИТАЛ с %s по %s\n", c.From.Format("02.01 15:04"), c.To.Format("02.01 15:04"))
+	fmt.Printf("  ISK:   %14s → %-14s  изменение %s\n", isk(c.ISKFrom), isk(c.ISKTo), isk(c.DeltaISK))
+	fmt.Printf("  склад: %14s → %-14s  изменение %s\n", isk(c.StockFrom), isk(c.StockTo), isk(c.DeltaStock))
+	fmt.Printf("  под ордерами на покупку сейчас: %s\n\n", isk(c.Escrow))
+	fmt.Printf("  движение ISK, проведённое реестром: %s\n", isk(c.Explained))
+	fmt.Printf("  НЕВЯЗКА (реестр этого не знает):    %s\n", isk(c.Residual))
+	if c.Opening != 0 {
+		fmt.Println("  из них начальные остатки (вклад собственника, не прибыль):", isk(c.Opening))
+	}
+	fmt.Println("  ПРИБЫЛЬ РЕЕСТРА:", isk(c.Profit))
+	fmt.Println()
+	fmt.Println("  движение ISK по видам:")
+	for i, k := range c.Kinds {
+		if i >= 12 {
+			fmt.Printf("    … ещё %d видов\n", len(c.Kinds)-12)
+			break
+		}
+		mark := "НЕ проведено"
+		if k.Posted {
+			mark = "проведено"
+		}
+		fmt.Printf("    %-28s %16s  %s\n", k.RefType, isk(k.Amount), mark)
+	}
+
+	stages, err := st.Stages(from, to)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if len(stages) > 0 {
+		fmt.Println("\n  вклад по переделам (по рыночной оценке):")
+		for _, s := range stages {
+			fmt.Printf("    %-14s док. %3d   вошло %14s   вышло %14s   вклад %s\n",
+				s.Kind, s.Docs, isk(s.InMkt), isk(s.OutMkt), isk(s.Added))
+		}
+	}
+}

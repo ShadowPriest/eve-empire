@@ -1,5 +1,6 @@
 # секреты и локальные данные
 .env
+.env.prod
 *.db
 *.db-wal
 *.db-shm
