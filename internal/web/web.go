@@ -320,6 +320,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/mail/{id}/{mail}", s.handleMailJSON)
 	mux.HandleFunc("POST /characters/{id}/account", s.handleSetAccount)
 	mux.HandleFunc("POST /accounts/omega", s.handleSetAccountOmega)
+	mux.HandleFunc("POST /accounts/rename", s.handleRenameAccount)
 	mux.HandleFunc("POST /characters/{id}/tags", s.handleSetTags)
 	mux.HandleFunc("POST /characters/{id}/delete", s.handleDelete)
 	mux.HandleFunc("GET /corporations/{id}/info", s.handleCorpInfo)
@@ -669,7 +670,8 @@ func (s *Server) handleSetLanguage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.ESI.SetLanguage(lang)
-	http.Redirect(w, r, "/settings", http.StatusFound)
+	// Язык живёт на вкладке «Персонализация» — возвращаемся на неё.
+	http.Redirect(w, r, "/settings#personal", http.StatusFound)
 }
 
 // chipData is everything an item chip can carry into the info modal.

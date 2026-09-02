@@ -1,3 +1,6 @@
+{{/* остаток дней одного слота подписки, с подсветкой sev-* */}}
+{{define "omgdays"}}{{if not .Raw}}<span class="muted">—</span>{{else if .Expired}}<b class="sev-err">истёк</b>{{else if eq .Class "err"}}<b class="sev-err">{{.Days}}д</b>{{else if eq .Class "warn"}}<b class="sev-warn">{{.Days}}д</b>{{else}}<b>{{.Days}}д</b>{{end}}{{end}}
+
 {{define "content"}}
 <h1>Настройки</h1>
 
@@ -5,11 +8,75 @@
 
 <datalist id="acctlist">{{range .Groups}}{{if .Key}}<option value="{{.Key}}"></option>{{end}}{{end}}</datalist>
 
-<h2>Персонажи</h2>
-<p style="margin:.4rem 0 1rem;"><a class="btnlink" href="/login">+ Добавить персонажа</a>
+{{/* Вкладки живут на одной странице (данные-то одни), переключение —
+     JS + #hash, чтобы вкладку можно было открыть ссылкой и перезагрузка
+     её не теряла. */}}
+<nav class="tabs" style="margin-top:1rem;">
+  <a href="#" data-stab="accounts">Аккаунты</a>
+  <a href="#personal" data-stab="personal">Персонализация</a>
+</nav>
+
+<div data-spane="accounts">
+<h2>Аккаунты и персонажи</h2>
+<p style="margin:.4rem 0 .3rem;"><a class="btnlink" href="/login">+ Добавить персонажа</a>
   <a class="btnlink" href="/reauth">Повторная авторизация</a></p>
+<p class="muted" style="font-size:.78rem; margin:.2rem 0 0;">
+  Даты омеги и учебных мест — из окна «Учётная запись» игрового клиента, EVE-время (UTC).
+  Формат: <b style="color:#b9c7da;">2027.03.01 05:20</b> или просто
+  <b style="color:#b9c7da;">2026.11.29</b>; пустое поле — не активно.
+  Переименование меняет метку сразу у всех персонажей аккаунта.</p>
 
 {{range .Groups}}
+{{/* свёрнута по умолчанию — JS разворачивает те, что пользователь
+     открывал (localStorage setgroupExpanded) */}}
+<div class="setgroup collapsed" data-account="{{.Key}}">
+  <div class="sghead" title="клик — свернуть аккаунт">
+    <i class="caret"></i>
+    {{if .Key}}
+    <span class="fld">
+      <span class="fv sgname">{{.Name}}</span>
+      <i class="pencil" title="переименовать аккаунт">✎</i>
+      <form class="fform" method="post" action="/accounts/rename">
+        <input type="hidden" name="account" value="{{.Key}}">
+        <input type="text" name="name" value="{{.Key}}" autocomplete="off">
+        <button type="submit">Сохранить</button>
+      </form>
+    </span>
+    {{else}}<span class="sgname">{{.Name}}</span>{{end}}
+    <span class="acnt">{{len .Chars}}</span>
+    {{if .Key}}<span class="sgsum">Ω {{template "omgdays" .Omega.Omega}}
+      · уч. 1 {{template "omgdays" .Omega.MCT1}}
+      · уч. 2 {{template "omgdays" .Omega.MCT2}}</span>{{end}}
+  </div>
+  {{/* свёрнутый вид: ряд портретов, как у аккаунта в сайдбаре */}}
+  <div class="sgmini">
+    {{range .Chars}}<a href="/characters/{{.ID}}" title="{{.Name}}"><img
+      src="https://images.evetech.net/characters/{{.ID}}/portrait?size=64" alt=""
+      class="{{if .Online}}online{{end}}"></a>{{end}}
+  </div>
+  <div class="sgbody">
+  {{if .Key}}
+  <div class="sgprops fld">
+    <span class="fv">
+      <span class="k">Омега</span> {{if .Omega.Omega.Raw}}{{.Omega.Omega.Disp}} · {{template "omgdays" .Omega.Omega}}{{else}}<span class="muted">—</span>{{end}}
+      <span class="sep">|</span>
+      <span class="k">Уч. место 1</span> {{if .Omega.MCT1.Raw}}{{.Omega.MCT1.Disp}} · {{template "omgdays" .Omega.MCT1}}{{else}}<span class="muted">—</span>{{end}}
+      <span class="sep">|</span>
+      <span class="k">Уч. место 2</span> {{if .Omega.MCT2.Raw}}{{.Omega.MCT2.Disp}} · {{template "omgdays" .Omega.MCT2}}{{else}}<span class="muted">—</span>{{end}}
+    </span>
+    <i class="pencil" title="изменить даты">✎</i>
+    <form class="omgform fform" method="post" action="/accounts/omega">
+      <input type="hidden" name="account" value="{{.Key}}">
+      <label>Омега <input type="text" name="omega" value="{{.Omega.Omega.Disp}}"
+        placeholder="2027.03.01 05:20" autocomplete="off"></label>
+      <label>Уч. место 1 <input type="text" name="mct1" value="{{.Omega.MCT1.Disp}}"
+        placeholder="2026.11.29" autocomplete="off"></label>
+      <label>Уч. место 2 <input type="text" name="mct2" value="{{.Omega.MCT2.Disp}}"
+        placeholder="2026.11.29" autocomplete="off"></label>
+      <button type="submit">Сохранить</button>
+    </form>
+  </div>
+  {{end}}
 {{range .Chars}}
 <div class="card maxm setchar" data-id="{{.ID}}" data-name="{{.Name}}">
   <img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=64" alt=""
@@ -22,14 +89,18 @@
       <span class="tag tadd" title="добавить теги">+</span>
     </div>
     {{/* Аккаунт раньше назначался перетаскиванием карточки в сайдбаре —
-         догадаться об этом было невозможно. Здесь он просто поле. */}}
-    <form class="acctform" method="post" action="/characters/{{.ID}}/account">
-      <input type="hidden" name="back" value="/settings">
-      <label class="klabel" for="acct{{.ID}}">Аккаунт</label>
-      <input id="acct{{.ID}}" type="text" name="account" value="{{.Account}}"
-             list="acctlist" autocomplete="off" placeholder="без аккаунта">
-      <button type="submit">Сохранить</button>
-    </form>
+         догадаться об этом было невозможно. Здесь он текст с карандашом. */}}
+    <div class="acctform fld">
+      <span class="klabel">Аккаунт</span>
+      <span class="fv">{{if .Account}}{{.Account}}{{else}}<span class="muted">без аккаунта</span>{{end}}</span>
+      <i class="pencil" title="перенести на другой аккаунт">✎</i>
+      <form class="fform" method="post" action="/characters/{{.ID}}/account">
+        <input type="hidden" name="back" value="/settings">
+        <input id="acct{{.ID}}" type="text" name="account" value="{{.Account}}"
+               list="acctlist" autocomplete="off" placeholder="без аккаунта">
+        <button type="submit">Сохранить</button>
+      </form>
+    </div>
   </div>
   <form method="post" action="/characters/{{.ID}}/delete"
         onsubmit="return confirm('Удалить {{.Name}} из кабинета?')">
@@ -37,27 +108,12 @@
   </form>
 </div>
 {{end}}
+  </div>
+</div>
 {{end}}
+</div>
 
-<h2>Омега и учебные места</h2>
-<p class="muted" style="font-size:.8rem; margin:.3rem 0 .5rem;">
-  Даты из окна «Учётная запись» игрового клиента, EVE-время (UTC).
-  Формат: <b style="color:#b9c7da;">2027.03.01 05:20</b> или просто
-  <b style="color:#b9c7da;">2026.11.29</b>; пустое поле — не активно.</p>
-{{range .Groups}}{{if .Key}}
-<form class="omgform" method="post" action="/accounts/omega">
-  <input type="hidden" name="account" value="{{.Key}}">
-  <span class="omgacct">{{.Name}}</span>
-  <label>Омега <input type="text" name="omega" value="{{.Omega.Omega.Disp}}"
-    placeholder="2027.03.01 05:20" autocomplete="off"></label>
-  <label>Уч. место 1 <input type="text" name="mct1" value="{{.Omega.MCT1.Disp}}"
-    placeholder="2026.11.29" autocomplete="off"></label>
-  <label>Уч. место 2 <input type="text" name="mct2" value="{{.Omega.MCT2.Disp}}"
-    placeholder="2026.11.29" autocomplete="off"></label>
-  <button type="submit">Сохранить</button>
-</form>
-{{end}}{{end}}
-
+<div data-spane="personal" hidden>
 <h2>Язык данных EVE</h2>
 <form method="post" action="/settings/language" class="frow" style="margin:.4rem 0 0;">
   <select name="language" id="langsel">
@@ -72,19 +128,25 @@
 
 <h2>Авторизация</h2>
 <p class="muted" style="font-size:.85rem;">Вход по паролю и выход из кабинета появятся позже.</p>
+{{/* «О программе» с лицензией AGPL переехала в модалку из меню-шестерёнки
+     (layout.html, #abouttpl) — доступна с любой страницы. */}}
+</div>
 
-<h2>О программе</h2>
-{{/* AGPL §13: у того, кто работает с программой по сети, должна быть
-     возможность взять исходники. Ссылка живёт здесь, а не в подвале
-     каждой страницы — кабинет личный, мозолить глаза ей незачем. */}}
-<p class="muted" style="font-size:.85rem; margin:.4rem 0 0;">
-  <b style="color:#b9c7da;">EVE Empire</b> — свободное ПО под лицензией
-  <a class="alink" href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">GNU AGPL-3.0</a>.
-  Исходный код:
-  <a class="alink" href="https://github.com/ShadowPriest/eve-empire" target="_blank" rel="noopener">github.com/ShadowPriest/eve-empire</a>.
-</p>
-<p class="muted" style="font-size:.75rem; margin:.3rem 0 0;">
-  Неофициальный сторонний инструмент. EVE Online и связанные материалы —
-  собственность Fenris Creations (до мая 2026 — CCP Games).
-</p>
+<script>
+(function () {
+  const tabs = document.querySelectorAll('[data-stab]');
+  const panes = document.querySelectorAll('[data-spane]');
+  function show(key) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.stab === key));
+    panes.forEach(p => p.hidden = p.dataset.spane !== key);
+  }
+  tabs.forEach(t => t.addEventListener('click', e => {
+    e.preventDefault();
+    history.replaceState(null, '',
+      t.dataset.stab === 'personal' ? '#personal' : location.pathname);
+    show(t.dataset.stab);
+  }));
+  show(location.hash === '#personal' ? 'personal' : 'accounts');
+})();
+</script>
 {{end}}

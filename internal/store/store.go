@@ -4,6 +4,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -584,6 +585,48 @@ func (s *Store) SaveSidebarOrder(groups []SidebarGroup) error {
 func (s *Store) SetAccount(characterID int64, account string) error {
 	_, err := s.db.Exec(`UPDATE characters SET account = ? WHERE character_id = ?`, account, characterID)
 	return err
+}
+
+// ErrAccountExists is returned by RenameAccount when the new label is
+// already taken — silently merging two accounts is not what anyone meant.
+var ErrAccountExists = errors.New("account already exists")
+
+// RenameAccount changes an account label everywhere it lives: on the
+// characters, in the sidebar order and on the omega dates.
+func (s *Store) RenameAccount(oldName, newName string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var n int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM characters WHERE account = ?`, newName).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrAccountExists
+	}
+	// Orphan rows under the new name (an account everyone was moved away
+	// from keeps its order/omega rows) would break the PK on UPDATE.
+	for _, q := range []string{
+		`DELETE FROM account_order WHERE account = ?`,
+		`DELETE FROM account_omega WHERE account = ?`,
+	} {
+		if _, err := tx.Exec(q, newName); err != nil {
+			return err
+		}
+	}
+	for _, q := range []string{
+		`UPDATE characters SET account = ? WHERE account = ?`,
+		`UPDATE account_order SET account = ? WHERE account = ?`,
+		`UPDATE account_omega SET account = ? WHERE account = ?`,
+	} {
+		if _, err := tx.Exec(q, newName, oldName); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // AccountOmega holds the hand-entered subscription dates of one account:

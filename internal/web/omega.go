@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -136,6 +137,28 @@ func newOmegaView(o store.AccountOmega, now time.Time) omegaView {
 		v.Class = "err"
 	}
 	return v
+}
+
+// handleRenameAccount renames an account: the label on every character,
+// the sidebar order and the omega dates move together.
+func (s *Server) handleRenameAccount(w http.ResponseWriter, r *http.Request) {
+	oldName := strings.TrimSpace(r.FormValue("account"))
+	newName := strings.TrimSpace(r.FormValue("name"))
+	if oldName == "" || newName == "" {
+		http.Error(w, "пустое имя аккаунта", http.StatusBadRequest)
+		return
+	}
+	if newName != oldName {
+		switch err := s.Store.RenameAccount(oldName, newName); {
+		case errors.Is(err, store.ErrAccountExists):
+			http.Error(w, "аккаунт "+newName+" уже существует", http.StatusBadRequest)
+			return
+		case err != nil:
+			httpError(w, "renaming account", err)
+			return
+		}
+	}
+	http.Redirect(w, r, "/settings", http.StatusFound)
 }
 
 // handleSetAccountOmega saves the subscription dates of one account

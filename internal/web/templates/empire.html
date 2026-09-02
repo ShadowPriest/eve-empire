@@ -1,5 +1,6 @@
-{{define "omgcell"}}<td class="r nowrap">{{if .Raw}}<span class="muted" style="font-size:.72rem;">{{.Disp}}</span>
-  {{if .Expired}}<b class="sev-err">истёк</b>{{else if eq .Class "err"}}<b class="sev-err">{{.Days}}д</b>{{else if eq .Class "warn"}}<b class="sev-warn">{{.Days}}д</b>{{else}}<b>{{.Days}}д</b>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>{{end}}
+{{/* дата ПОД остатком дней, а не рядом: три колонки «дата + дни» в одну
+     строку шире карточки, и таблица вылезала за её край */}}
+{{define "omgcell"}}<td class="r nowrap">{{if .Raw}}{{if .Expired}}<b class="sev-err">истёк</b>{{else if eq .Class "err"}}<b class="sev-err">{{.Days}}д</b>{{else if eq .Class "warn"}}<b class="sev-warn">{{.Days}}д</b>{{else}}<b>{{.Days}}д</b>{{end}}<span class="muted" style="display:block;font-size:.68rem;">{{.Disp}}</span>{{else}}<span class="muted">—</span>{{end}}</td>{{end}}
 
 {{define "content"}}
 {{template "empiretabs" "summary"}}
