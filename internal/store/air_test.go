@@ -5,26 +5,47 @@ import (
 	"time"
 )
 
+// TestAirSnapToDowntime: дата окончания месяца всегда встаёт на 11:00
+// UTC (даунтайм) — остаток вводится руками, и задержка между «посмотрел
+// в игре» и «вбил» до ±12 часов должна гаситься округлением.
+func TestAirSnapToDowntime(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"2026-10-01 18:45:24", "2026-10-01 11:00:00"}, // вбили на 7ч45м позже
+		{"2026-10-01 03:10:00", "2026-10-01 11:00:00"}, // вбили заранее
+		{"2026-10-01 23:30:00", "2026-10-02 11:00:00"}, // ближе к следующему ДТ
+		{"2026-10-01 11:00:00", "2026-10-01 11:00:00"}, // уже ровно
+	}
+	for _, c := range cases {
+		in, _ := time.Parse("2006-01-02 15:04:05", c.in)
+		if got := airSnapToDowntime(in).Format("2006-01-02 15:04:05"); got != c.want {
+			t.Errorf("snap(%s) = %s, ждали %s", c.in, got, c.want)
+		}
+	}
+}
+
 // TestAirSyncWalletDays закрывает сверенную с живой базой механику:
 // деление шкалы AIR — запись daily_goal_payouts с reason дневного пункта
 // (1004953); на каждый пункт две записи — личная и корп-дубль, их счёт
 // не складывается, берётся больший. Задания дня (другие reason) и вехи
 // делений не дают; накопленные пункты клеймятся пачкой одной секундой.
-// Счётчик только повышается.
+// Окно месяца — календарное (с ДТ накануне 1-го числа), счёт режется
+// потолком прошедших дней, ручной счётчик синк не трогает.
 func TestAirSyncWalletDays(t *testing.T) {
 	s := testStore(t)
-	now := time.Now().UTC()
+	// Сентябрь 2026: шкала открылась 31.08 11:00, обновится 01.10 11:00.
+	now := time.Date(2026, 9, 4, 4, 0, 0, 0, time.UTC) // идёт 4-й день
+	reset := time.Date(2026, 10, 1, 11, 0, 0, 0, time.UTC)
 
 	for _, c := range []struct {
 		id   int64
 		name string
-	}{{100, "Taxed"}, {200, "CorpOnly"}} {
+	}{{100, "Taxed"}, {200, "CorpOnly"}, {400, "Banked"}} {
 		if _, err := s.db.Exec(`INSERT INTO characters (character_id, name, added_at)
 			VALUES (?, ?, ?)`, c.id, c.name, now.Unix()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.SetAirResetAt(now.Add(10 * 24 * time.Hour)); err != nil {
+	if err := s.SetAirResetAt(reset); err != nil {
 		t.Fatal(err)
 	}
 
@@ -39,33 +60,40 @@ func TestAirSyncWalletDays(t *testing.T) {
 		}
 	}
 	daily := airDailyGoalReason
+	day1 := time.Date(2026, 8, 31, 15, 0, 0, 0, time.UTC) // первый день: открылся в ДТ 31.08
+	day3 := time.Date(2026, 9, 3, 14, 0, 0, 0, time.UTC)
 
-	// Персонаж 100: дневной пункт позавчера, потом два накопленных
-	// клеймлены пачкой в одну секунду — 3 деления. Корп-дубли отстают
-	// (собраны только 2) — берётся большее, а не сумма. Задание дня
-	// (697667) и веха (712833) делений не дают.
-	d1, d2 := now.Add(-72*time.Hour), now.Add(-24*time.Hour)
-	journal(100, 0, 100, d1, 500, daily)
-	journal(100, 0, 100, d2, 500, daily)
-	journal(100, 0, 100, d2, 500, daily)
-	journal(999, 1, 100, d1, 499500, daily)
-	journal(999, 1, 100, d2, 499500, daily)
-	journal(100, 0, 100, d1, 500, "697667")
-	journal(100, 0, 100, d2, 8000000, "712833")
+	// Персонаж 100: пункт в первый день (31.08 после ДТ — уже сентябрьская
+	// шкала), потом два накопленных клеймлены пачкой в одну секунду — 3
+	// деления. Корп-дубли отстают (собраны 2) — берётся большее, не сумма.
+	// Задание дня (697667) и веха (712833) делений не дают.
+	journal(100, 0, 100, day1, 500, daily)
+	journal(100, 0, 100, day3, 500, daily)
+	journal(100, 0, 100, day3, 500, daily)
+	journal(999, 1, 100, day1, 499500, daily)
+	journal(999, 1, 100, day3, 499500, daily)
+	journal(100, 0, 100, day1, 500, "697667")
+	journal(100, 0, 100, day3, 8000000, "712833")
 	// Персонаж 200: личный журнал не собирается, корп-дубли есть — 2.
-	journal(999, 1, 200, d1, 499500, daily)
-	journal(999, 1, 200, d2, 499500, daily)
-	journal(999, 1, 200, d2, 499500, "697671")
-	// Мимо окна месяца и мимо ростера — не считается.
-	journal(100, 0, 100, now.Add(-25*24*time.Hour), 500, daily)
-	journal(300, 0, 300, d1, 500000, daily)
+	journal(999, 1, 200, day1, 499500, daily)
+	journal(999, 1, 200, day3, 499500, daily)
+	journal(999, 1, 200, day3, 499500, "697671")
+	// Персонаж 400: 5 пунктов пачкой — клейм-хвосты августа; прошло
+	// только 4 дня месяца, потолок режет до 4.
+	for i := 0; i < 5; i++ {
+		journal(400, 0, 400, day3, 500000, daily)
+	}
+	// До открытия шкалы (31.08 до ДТ) и мимо ростера — не считается.
+	journal(100, 0, 100, time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC), 500, daily)
+	journal(300, 0, 300, day3, 500000, daily)
 
 	wallet, err := s.AirSyncWalletDays(now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wallet[100] != 3 || wallet[200] != 2 {
-		t.Fatalf("дни по валету: 100=%d 200=%d, ждали 3 и 2", wallet[100], wallet[200])
+	if wallet[100] != 3 || wallet[200] != 2 || wallet[400] != 4 {
+		t.Fatalf("дни по валету: 100=%d 200=%d 400=%d, ждали 3, 2 и 4",
+			wallet[100], wallet[200], wallet[400])
 	}
 	if _, ok := wallet[300]; ok {
 		t.Fatal("чужой персонаж 300 не должен попадать в сверку")
@@ -75,22 +103,34 @@ func TestAirSyncWalletDays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := states[100].DaysDone; got != 3 {
-		t.Fatalf("персонаж 100: days=%d, ждали 3", got)
-	}
-	if got := states[200].DaysDone; got != 2 {
-		t.Fatalf("персонаж 200: days=%d, ждали 2", got)
+	for id, want := range map[int64]int{100: 3, 200: 2, 400: 4} {
+		if got := states[id].DaysDone; got != want {
+			t.Fatalf("персонаж %d: days=%d, ждали %d", id, got, want)
+		}
 	}
 
-	// Руками выставлено больше, чем видит валет, — не понижаем.
-	if err := s.SetAirDays(200, 7); err != nil {
+	// Рука святее валета: ручная правка вниз (клейм-хвост в пределах
+	// потолка синк не различит) не перетирается следующим синком.
+	if err := s.SetAirDays(400, 3); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.AirSyncWalletDays(now); err != nil {
 		t.Fatal(err)
 	}
 	states, _ = s.AirStates()
-	if got := states[200].DaysDone; got != 7 {
-		t.Fatalf("персонаж 200: days=%d, ручные 7 не должны понижаться", got)
+	if got := states[400].DaysDone; got != 3 {
+		t.Fatalf("персонаж 400: days=%d, ручные 3 не должны перетираться", got)
+	}
+	// А без ручной метки счётчик следует за валетом в обе стороны.
+	if _, err := s.db.Exec(`DELETE FROM hist_journal WHERE second_party_id = 200 AND date = ?`,
+		day3.Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AirSyncWalletDays(now); err != nil {
+		t.Fatal(err)
+	}
+	states, _ = s.AirStates()
+	if got := states[200].DaysDone; got != 1 {
+		t.Fatalf("персонаж 200: days=%d, без ручной метки счётчик следует за валетом", got)
 	}
 }

@@ -87,8 +87,8 @@
     <p class="trnm2 ell"><a class="alink" href="/characters/{{.ID}}">{{.Name}}</a></p>
     <p class="knote muted ell">{{if .Omega}}<span class="pos" title="омега активна">Ω</span>{{else}}<span title="альфа">α</span>{{end}}{{if .Account}} · {{.Account}}{{end}}</p>
     {{if .WalletDays}}
-    <p class="knote ell {{if lt .WalletDays .Days}}muted{{else}}pos{{end}}"
-       title="дневные пункты AIR по журналам валетов (личному и корповому) за этот месяц; счётчик поднимается по ним автоматически, но валет может недосчитать (сбор журналов не с начала месяца, мёртвые токены)">валет: {{.WalletDays}} дн.</p>
+    <p class="knote ell {{if eq .WalletDays .Days}}pos{{else}}muted{{end}}"
+       title="дневные пункты AIR по журналам валетов (личному и корповому) за этот месяц; без ручной правки счётчик следует за ними, клик по плитке делает счётчик ручным до конца месяца. Валет может и недосчитать (сбор не с начала месяца, мёртвые токены), и перебрать на стыке месяцев (клейм хвостов прошлого месяца)">валет: {{.WalletDays}} дн.</p>
     {{end}}
   </div>
   <div class="airtiles">

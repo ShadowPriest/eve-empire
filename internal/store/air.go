@@ -2,6 +2,7 @@ package store
 
 import (
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -18,13 +19,12 @@ import (
 // Награды AIR: 10 000 SP за каждый день, финальная веха на 15-м дне —
 // 75 000 SP альфе и ещё 150 000 SP омеге.
 const (
-	AirMonthDays   = 30
-	AirYearMonths  = 12
-	AirDaySP       = 10_000
-	AirFinalDay    = 15
-	AirFinalSP     = 75_000
-	AirFinalOmega  = 150_000
-	airResetPeriod = AirMonthDays * 24 * time.Hour
+	AirMonthDays  = 30
+	AirYearMonths = 12
+	AirDaySP      = 10_000
+	AirFinalDay   = 15
+	AirFinalSP    = 75_000
+	AirFinalOmega = 150_000
 )
 
 // AirMonthSP считает SP за месяц AIR по числу выполненных дней.
@@ -44,7 +44,8 @@ func (s *Store) migrateAir() error {
 CREATE TABLE IF NOT EXISTS air_state (
     character_id INTEGER PRIMARY KEY,
     month_no     INTEGER NOT NULL DEFAULT 1, -- 1..12
-    days_done    INTEGER NOT NULL DEFAULT 0  -- 0..30
+    days_done    INTEGER NOT NULL DEFAULT 0, -- 0..30
+    hand         INTEGER NOT NULL DEFAULT 0  -- 1 = выставлено руками
 );
 CREATE TABLE IF NOT EXISTS air_month (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +56,20 @@ CREATE TABLE IF NOT EXISTS air_month (
     omega        INTEGER NOT NULL, -- статус на момент закрытия
     sp           INTEGER NOT NULL  -- зафиксированный итог месяца
 )`)
-	return err
+	if err != nil {
+		return err
+	}
+	// hand: рука святее валета — клейм-хвосты прошлого месяца завышают
+	// счёт по журналу, и различить их нечем, поэтому ручной счётчик синк
+	// не трогает. Базы до колонки заполнялись руками — им hand=1.
+	if _, err := s.db.Exec(`ALTER TABLE air_state ADD COLUMN hand INTEGER NOT NULL DEFAULT 0`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	} else if _, err := s.db.Exec(`UPDATE air_state SET hand = 1 WHERE days_done > 0`); err != nil {
+		return err
+	}
+	return nil
 }
 
 // AirState is the live AIR progress of one character.
@@ -94,12 +108,13 @@ func clampAir(v, lo, hi int) int {
 	return v
 }
 
-// SetAirDays sets the day counter of one character (a tile click).
+// SetAirDays sets the day counter of one character (a tile click) and
+// marks it hand-set: the wallet sync must not fight a human correction.
 func (s *Store) SetAirDays(characterID int64, days int) error {
 	days = clampAir(days, 0, AirMonthDays)
-	_, err := s.db.Exec(`INSERT INTO air_state (character_id, month_no, days_done)
-		VALUES (?, 1, ?)
-		ON CONFLICT(character_id) DO UPDATE SET days_done = excluded.days_done`,
+	_, err := s.db.Exec(`INSERT INTO air_state (character_id, month_no, days_done, hand)
+		VALUES (?, 1, ?, 1)
+		ON CONFLICT(character_id) DO UPDATE SET days_done = excluded.days_done, hand = 1`,
 		characterID, days)
 	return err
 }
@@ -215,10 +230,10 @@ func (s *Store) CloseAirMonth(now time.Time) (int, error) {
 			AirMonthSP(st.DaysDone, omega)); err != nil {
 			return 0, err
 		}
-		if _, err := tx.Exec(`INSERT INTO air_state (character_id, month_no, days_done)
-			VALUES (?, ?, 0)
+		if _, err := tx.Exec(`INSERT INTO air_state (character_id, month_no, days_done, hand)
+			VALUES (?, ?, 0, 0)
 			ON CONFLICT(character_id) DO UPDATE SET
-				month_no = excluded.month_no, days_done = 0`,
+				month_no = excluded.month_no, days_done = 0, hand = 0`,
 			c.id, st.MonthNo%AirYearMonths+1); err != nil {
 			return 0, err
 		}
@@ -261,12 +276,23 @@ func boolInt(b bool) int {
 // локальные выборки из hist_journal, а не походы в ESI.
 const airDailyGoalReason = "1004953"
 
-// airWalletWindow — окно текущего месяца AIR: от известного момента
-// обновления шкалы минус 30 суток. Без таймера — от последнего закрытия.
-// Совсем без ориентиров окна нет — валет не применяем, только руки.
+// airMonthStart — начало шкалы по моменту её окончания. Шкала живёт по
+// календарному месяцу (сверено с живой базой и владельцем): сентябрьская
+// кончается 01.10 в ДТ, а её первый дневной пункт открылся 31.08 в ДТ —
+// то есть с даунтайма НАКАНУНЕ 1-го числа. «Минус 30 суток» здесь
+// неверно: такой месяц длится 31 день.
+func airMonthStart(reset time.Time) time.Time {
+	prev := reset.UTC().Add(-24 * time.Hour) // любой момент внутри месяца шкалы
+	first := time.Date(prev.Year(), prev.Month(), 1, 11, 0, 0, 0, time.UTC)
+	return first.Add(-24 * time.Hour)
+}
+
+// airWalletWindow — окно текущего месяца AIR: от его начала до известного
+// момента обновления шкалы. Без таймера — от последнего закрытия. Совсем
+// без ориентиров окна нет — валет не применяем, только руки.
 func (s *Store) airWalletWindow(now time.Time) (from, to time.Time, ok bool) {
 	if at := s.AirResetAt(); !at.IsZero() {
-		return at.Add(-airResetPeriod), at, true
+		return airMonthStart(at), at, true
 	}
 	var closed int64
 	_ = s.db.QueryRow(`SELECT COALESCE(MAX(closed_at), 0) FROM air_month`).Scan(&closed)
@@ -278,15 +304,20 @@ func (s *Store) airWalletWindow(now time.Time) (from, to time.Time, ok bool) {
 
 // AirSyncWalletDays подтягивает счётчики дней из собранных журналов
 // (личных и корповых) и возвращает дни по валету для сверки на странице.
-// Только повышает: журнал собирается с конца июля и не у всех альтов,
-// так что «в валете пусто» не значит «не выполнял». Погрешность на стыке
-// месяцев возможна: пункты, скопленные в старом месяце и заклеймленные
-// после обновления шкалы, попадают в новое окно — руки поправят.
+// Счёт режется потолком прошедших дней месяца: больше физически быть не
+// может, а клейм-хвосты прошлого месяца, заклеймленные после обновления
+// шкалы, иначе завышают первые дни. Хвост в пределах потолка неотличим —
+// поэтому ручной счётчик (hand) синк не трогает вовсе, а без ручной
+// метки ведёт счётчик за валетом в обе стороны. «В валете пусто» не
+// значит «не выполнял»: журнал собирается с конца июля и не у всех
+// альтов, поэтому нулевые дни без записей не обнуляют ничего.
 func (s *Store) AirSyncWalletDays(now time.Time) (map[int64]int, error) {
 	from, to, ok := s.airWalletWindow(now)
 	if !ok {
 		return nil, nil
 	}
+	maxDays := int(now.Sub(from).Hours()/24) + 1
+	maxDays = clampAir(maxDays, 0, AirMonthDays)
 	wallet := map[int64]int{}
 	for _, q := range []string{
 		// личный журнал: владелец — сам персонаж
@@ -323,13 +354,15 @@ func (s *Store) AirSyncWalletDays(now time.Time) (map[int64]int, error) {
 		}
 	}
 	for id, days := range wallet {
-		if days > AirMonthDays {
-			days = AirMonthDays
+		if days > maxDays {
+			days = maxDays
+			wallet[id] = days
 		}
-		if _, err := s.db.Exec(`INSERT INTO air_state (character_id, month_no, days_done)
-			VALUES (?, 1, ?)
+		if _, err := s.db.Exec(`INSERT INTO air_state (character_id, month_no, days_done, hand)
+			VALUES (?, 1, ?, 0)
 			ON CONFLICT(character_id) DO UPDATE SET
-				days_done = MAX(days_done, excluded.days_done)`, id, days); err != nil {
+				days_done = excluded.days_done
+				WHERE air_state.hand = 0`, id, days); err != nil {
 			return wallet, err
 		}
 	}
@@ -337,6 +370,20 @@ func (s *Store) AirSyncWalletDays(now time.Time) (map[int64]int, error) {
 }
 
 // ── таймер автообновления ────────────────────────────────────────────
+
+// Шкала AIR обновляется в даунтайм, а он статичен — 11:00 UTC каждый
+// день. Поэтому дата окончания всегда округляется до ближайших 11:00:
+// остаток вводится руками с игрового таймера, и любая задержка между
+// «посмотрел» и «вбил» (до ±12 часов) гасится округлением. Окно месяца
+// (окончание −30 суток) от этого тоже встаёт ровно на даунтайм.
+func airSnapToDowntime(t time.Time) time.Time {
+	t = t.UTC()
+	dt := time.Date(t.Year(), t.Month(), t.Day(), 11, 0, 0, 0, time.UTC)
+	if t.Sub(dt) >= 12*time.Hour {
+		return dt.Add(24 * time.Hour)
+	}
+	return dt
+}
 
 // AirResetAt returns the stored auto-reset moment (zero when unset).
 func (s *Store) AirResetAt() time.Time {
@@ -347,20 +394,24 @@ func (s *Store) AirResetAt() time.Time {
 	return time.Unix(v, 0)
 }
 
-// SetAirResetAt stores the auto-reset moment; zero clears it.
+// SetAirResetAt stores the auto-reset moment, snapped to the 11:00 UTC
+// downtime; zero clears it.
 func (s *Store) SetAirResetAt(t time.Time) error {
 	if t.IsZero() {
 		return s.SetSetting("air_reset_at", "")
 	}
-	return s.SetSetting("air_reset_at", strconv.FormatInt(t.Unix(), 10))
+	return s.SetSetting("air_reset_at", strconv.FormatInt(airSnapToDowntime(t).Unix(), 10))
 }
 
-// airAdvanceReset moves a due reset moment forward in 30-day steps. One
-// step per close: after months of downtime the intermediate results are
-// unknowable anyway, so a single close must not spawn duplicate rows.
+// airAdvanceReset moves a due reset moment to the next monthly downtime
+// still ahead. One close per catch-up: after months of downtime the
+// intermediate results are unknowable anyway, so a single close must not
+// spawn duplicate rows.
 func (s *Store) airAdvanceReset(at, now time.Time) error {
+	at = at.UTC()
 	for !at.After(now) {
-		at = at.Add(airResetPeriod)
+		// ДТ 1-го числа следующего месяца; time.Date нормализует декабрь+1.
+		at = time.Date(at.Year(), at.Month()+1, 1, 11, 0, 0, 0, time.UTC)
 	}
 	return s.SetAirResetAt(at)
 }
