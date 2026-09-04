@@ -94,6 +94,8 @@ func (c *Collector) Tasks() []sched.Task {
 		{Name: "jobs", Every: 30 * time.Minute, First: 2 * time.Minute, Run: c.Jobs},
 		{Name: "blueprints", Every: 6 * time.Hour, First: 4 * time.Minute, Run: c.Blueprints},
 		{Name: "assets", Every: time.Hour, First: 3 * time.Minute, Run: c.Assets},
+		{Name: "spfarm", Every: time.Hour, First: 5 * time.Minute, Run: c.SPFarmPrices},
+		{Name: "air", Every: 5 * time.Minute, First: time.Minute, Run: c.AIRAutoClose},
 	}
 }
 

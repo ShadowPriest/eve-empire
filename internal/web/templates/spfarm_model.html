@@ -1,0 +1,340 @@
+{{define "content"}}
+<h1>SP-ферма</h1>
+<nav class="tabs">
+  <a href="/tools/spfarm">SP-ферма</a>
+  <a class="active">Модель фермы</a>
+  <a href="/tools/plex">Хранилище PLEX</a>
+</nav>
+
+{{if .Err}}<p class="err">{{.Err}}</p>{{end}}
+
+{{/* ── ростер фермы ── */}}
+<div class="card">
+  <div class="frow" style="justify-content:space-between; align-items:baseline;">
+    <p class="klabel" style="margin:0;">Ферма: аккаунты и персонажи
+      <span class="muted" style="font-size:.78rem;">· скорость — из живой очереди навыков; в прогноз идёт, только когда тренируемый навык из пула персонажа</span></p>
+    <p class="klabel" style="margin:0;">выбрано: <b id="sum-accts">{{.FarmAccounts}}</b> окон · <b id="sum-chars">{{.SelChars}}</b> персонажей ·
+      прогноз <b id="sum-sp">{{iskraw .SPTotal}}</b> SP/год</p>
+  </div>
+  <form method="post" action="/tools/spfarm/roster" id="rosterform">
+    <div style="display:flex; flex-direction:column; gap:.7rem; margin-top:.9rem;">
+      {{range $i, $a := .Roster}}
+      <details class="acctfold" data-key="{{$a.Key}}">
+        <summary>
+          <i class="foldarrow">▶</i>
+          <label class="frow" style="gap:.5rem; cursor:pointer;" onclick="event.stopPropagation()">
+            <input type="checkbox" name="acct" value="{{$a.Key}}"{{if $a.InFarm}} checked{{end}} style="accent-color:#4da3ff;">
+            <span class="klabel" style="margin:0;"><b>{{if $a.Name}}{{$a.Name}}{{else}}Без аккаунта{{end}}</b> — окно фермы</span>
+          </label>
+          <span class="knote muted" style="margin-left:auto;" id="acctsum-{{$i}}">выбрано {{$a.SelCount}} из {{len $a.Chars}}{{if $a.SelCount}} · ≈ {{iskraw $a.SPSum}} SP/год{{end}}</span>
+        </summary>
+        <div class="charsgrid">
+          {{range $a.Chars}}
+          <div class="charcard" data-id="{{.ID}}" data-rate="{{printf "%g" .Rate}}" data-skill="{{.Skill}}"
+               data-airsp="{{printf "%.0f" .AirSP}}" data-spyear="{{printf "%.0f" .SPYear}}"{{if .Paused}} data-paused="1"{{end}}
+               style="position:relative; border:1px solid #1b2436; border-radius:8px; padding:.7rem .8rem; display:flex; gap:.7rem; align-items:flex-start;">
+            <button class="chargear" type="button" data-char="{{.ID}}" data-name="{{.Name}}"
+                    onclick="openPool(this)" title="настройки персонажа">⚙</button>
+            <label style="display:flex; gap:.55rem; align-items:center; cursor:pointer; flex:none;">
+              <input type="checkbox" name="char" value="{{.ID}}"{{if .Selected}} checked{{end}} style="accent-color:#4da3ff;">
+              <img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=64" alt="" loading="lazy"
+                   style="width:44px; height:44px; border-radius:8px; border:1px solid #1b2436;">
+            </label>
+            <div style="min-width:0; flex:1; padding-right:1.2rem;">
+              <p style="margin:0;"><b style="color:#e8eef7;">{{.Name}}</b>
+                {{if .Paused}}
+                <span class="rb warn" title="очередь навыков пуста или на паузе — скорость не считается">пауза</span>
+                {{else}}
+                <span class="rb{{if .InPool}} pos{{end}}" id="skillrb-{{.ID}}" title="зелёный — тренируемый навык из пула и идёт в прогноз">{{.Skill}} · {{sprate .Rate}}</span>
+                {{end}}
+                <span class="buy" id="offpool-{{.ID}}" style="font-size:.72rem;{{if or .Paused .InPool}} display:none;{{end}}">не из пула</span></p>
+              <p class="knote muted" style="margin-top:.3rem;">прогноз ≈ <b style="color:#b9c7da;" id="spyear-{{.ID}}">{{iskraw .SPYear}}</b> SP/год ·
+                пул: <span id="poolcnt-{{.ID}}">{{.PoolCount}}</span> навыков</p>
+              <input type="hidden" name="pool-{{.ID}}" id="pool-{{.ID}}" value="{{.Pool}}">
+            </div>
+          </div>
+          {{end}}
+        </div>
+      </details>
+      {{end}}
+    </div>
+    <button class="tog on" type="submit" style="margin-top:.9rem;">Сохранить ферму</button>
+  </form>
+</div>
+
+{{/* ── предложения магазина EVE ── */}}
+<div class="card" style="margin-top:1rem;">
+  <p class="klabel" style="margin-top:0;">Предложения магазина EVE
+    <span class="muted" style="font-size:.78rem;">· цена окна в PLEX; модель пересчитывает любое предложение в PLEX/год</span></p>
+  {{if .Offers}}
+  <table style="margin-top:.6rem; max-width:760px;">
+    <tr><th></th><th>Предложение</th><th class="r">PLEX</th><th class="r">Месяцев</th><th class="r">PLEX/год</th><th></th></tr>
+    {{range .Offers}}
+    <tr>
+      <td>
+        <form method="post" action="/tools/spfarm/offer/select" style="display:inline;">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button class="tog{{if eq .ID $.P.OfferID}} on{{end}}" type="submit" title="считать модель по этому предложению">
+            {{if eq .ID $.P.OfferID}}выбрано{{else}}выбрать{{end}}</button>
+        </form>
+      </td>
+      <td>{{.Name}}</td>
+      <td class="r">{{iskraw .Plex}}</td>
+      <td class="r">{{.Months}}</td>
+      <td class="r">{{iskraw .PlexPerYear}}</td>
+      <td class="r">
+        <form method="post" action="/tools/spfarm/offer/delete" onsubmit="return confirm('Удалить предложение?');" style="display:inline;">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button class="tog" type="submit" title="удалить">✕</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="knote muted" style="margin-top:.5rem;">Предложений пока нет — добавь из магазина EVE, например «Омега 12 мес + 2 уч. места — 4100 PLEX».</p>
+  {{end}}
+  <p class="knote" style="margin-top:.6rem;">Сейчас в модели:
+    {{if .PkgName}}<b style="color:#e8eef7;">{{.PkgName}}</b> — {{iskraw .PkgYear}} PLEX/год на аккаунт{{else}}предложение не выбрано, считается запасное значение {{iskraw .PkgYear}} PLEX/год{{end}}</p>
+  <form method="post" action="/tools/spfarm/offer/add" class="frow" style="gap:1rem; flex-wrap:wrap; margin-top:.7rem; align-items:flex-end;">
+    <label class="ofield" style="flex:1; min-width:16rem;">
+      <span class="klabel">Название</span>
+      <input type="text" name="name" value="" placeholder="Омега 12 мес + 2 уч. места (акция)">
+    </label>
+    <label class="ofield" style="width:8rem;">
+      <span class="klabel">Цена, PLEX</span>
+      <input type="text" name="plex" value="" placeholder="4100">
+    </label>
+    <label class="ofield" style="width:7rem;" title="на сколько месяцев рассчитано предложение">
+      <span class="klabel">Месяцев</span>
+      <input type="text" name="months" value="12">
+    </label>
+    <button class="tog on" type="submit">Добавить</button>
+  </form>
+</div>
+
+{{/* ── прочие параметры ── */}}
+<div class="card" style="margin-top:1rem; max-width:760px;">
+  <p class="klabel" style="margin-top:0;">Прочие параметры</p>
+  <form method="post" action="/tools/spfarm/params" class="frow" style="gap:1rem; flex-wrap:wrap; margin-top:.7rem; align-items:flex-end;">
+    <label class="frow" style="gap:.45rem; cursor:pointer; padding-bottom:.4rem;"
+           title="учитывать ли SP от AIR в прогнозе; сам AIR станет отдельной сущностью с авто-сбором из валетов — пока его вклад 0">
+      <input type="checkbox" name="use_air" value="1"{{if .P.UseAIR}} checked{{end}} style="accent-color:#4da3ff;">
+      <span class="klabel">учитывать AIR <span class="muted" style="font-size:.72rem;">(сущность в разработке)</span></span>
+    </label>
+    <label class="ofield" style="width:9rem;" title="бустеры и прочие траты PLEX в год на аккаунт">
+      <span class="klabel">Бустеры, PLEX/год</span>
+      <input type="text" name="booster" value="{{printf "%.0f" .P.BoosterPLEX}}">
+    </label>
+    <label class="ofield" style="width:7rem;" title="налог с продажи + брокерская комиссия, % от цены инжектора">
+      <span class="klabel">Налог, %</span>
+      <input type="text" name="tax" value="{{printf "%g" .P.TaxPct}}">
+    </label>
+    <button class="tog on" type="submit">Сохранить</button>
+  </form>
+  <p class="knote muted" style="margin-top:.7rem;">Стороны стакана переключаются на вкладке SP-фермы, у самих цен.
+    Пока ферма не набрана, расчёт идёт по запасным параметрам ({{.P.Accounts}} окон, линии {{.P.RatesStr}} SP/мин).</p>
+</div>
+
+{{/* ── модалка настроек персонажа ── */}}
+<dialog id="pooldlg" style="background:#121826; border:1px solid #35507a; border-radius:10px; color:#c9d4e3;
+        padding:1.1rem 1.3rem; width:min(680px, 92vw);">
+  <div class="frow" style="gap:.7rem;">
+    <img id="pool-portrait" src="" alt="" style="width:44px; height:44px; border-radius:8px; border:1px solid #1b2436;">
+    <div>
+      <p class="klabel" style="margin:0; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em;">Настройки персонажа</p>
+      <p style="margin:.15rem 0 0; color:#e8eef7; font-size:1.05rem;"><b id="pool-char"></b></p>
+    </div>
+  </div>
+  <p class="klabel" style="margin:1rem 0 0;">Пул навыков</p>
+  <div class="frow" style="gap:.6rem; margin-top:.5rem;">
+    <select id="pool-plans" style="background:#0b0e14; border:1px solid #2a3a55; border-radius:6px; color:#e8eef7;
+            padding:.35rem .5rem; font:inherit; font-size:.85rem; flex:1; min-width:0;">
+      <option value="">— вставить план прокачки —</option>
+    </select>
+    <button class="tog" type="button" id="pool-save-plan" title="сохранить текст ниже как новый план">Сохранить как план</button>
+    <button class="tog" type="button" id="pool-del-plan" title="удалить выбранный в списке план">Удалить план</button>
+  </div>
+  <textarea id="pool-text" rows="14" spellcheck="false"
+    placeholder="Скопируй план из окна навыков игры и вставь сюда — формат <localized ...> понимается. Или просто названия навыков, по одному на строку. Пусто — засчитывается любой навык."
+    style="width:100%; margin-top:.7rem; background:#0b0e14; border:1px solid #2a3a55; border-radius:6px;
+           color:#e8eef7; font:inherit; font-size:.82rem; padding:.5rem .6rem; resize:vertical;"></textarea>
+  <div class="frow" style="justify-content:flex-end; gap:.6rem; margin-top:.8rem;">
+    <button class="tog" type="button" id="pool-cancel">Отмена</button>
+    <button class="tog on" type="button" id="pool-apply" title="подставить в форму; сохранится кнопкой «Сохранить ферму»">Применить</button>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  let PLANS = {{.PlansJSON}} || [];
+  // Зеркало серверной модели для живого пересчёта карточек. Вклад AIR
+  // приходит с сервера в data-airsp каждой карточки (сейчас 0 — станет
+  // отдельной сущностью с авто-сбором из валетов).
+  const R = { minutes: 525600 };
+  const fmtNum = v => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
+  // Зеркало poolSkills из Go: игровой формат <localized ...> и простые
+  // строки с необязательным уровнем в хвосте.
+  const locRe = /<localized hint="([^"]*)">([^<]*)<\/localized>/i;
+  function parsePool(t) {
+    const set = new Set();
+    for (let line of (t || '').split('\n')) {
+      line = line.trim();
+      if (!line) continue;
+      const m = line.match(locRe);
+      if (m) {
+        for (const raw of [m[1], m[2]]) {
+          const n = raw.trim().replace(/\*$/, '').trim().toLowerCase();
+          if (n) set.add(n);
+        }
+        continue;
+      }
+      const low = line.toLowerCase();
+      set.add(low);
+      const i = low.lastIndexOf(' ');
+      if (i > 0 && ['1', '2', '3', '4', '5', 'i', 'ii', 'iii', 'iv', 'v'].includes(low.slice(i + 1))) {
+        set.add(low.slice(0, i).trim());
+      }
+    }
+    return set;
+  }
+
+  // Переоценка одной карточки после правки пула: бейдж «из пула / не из
+  // пула» и прогноз SP/год.
+  function evalChar(id) {
+    const card = document.querySelector(`.charcard[data-id="${id}"]`);
+    if (!card || card.dataset.paused) return;
+    const set = parsePool(document.getElementById('pool-' + id).value);
+    const skill = (card.dataset.skill || '').trim().toLowerCase();
+    const rate = parseFloat(card.dataset.rate) || 0;
+    const inPool = set.size === 0 || (skill !== '' && set.has(skill));
+    const air = parseFloat(card.dataset.airsp) || 0;
+    const sp = air + (rate > 0 && inPool ? rate * R.minutes : 0);
+    card.dataset.spyear = Math.round(sp);
+    const rb = document.getElementById('skillrb-' + id);
+    if (rb) rb.classList.toggle('pos', inPool);
+    const off = document.getElementById('offpool-' + id);
+    if (off) off.style.display = inPool ? 'none' : '';
+    const spEl = document.getElementById('spyear-' + id);
+    if (spEl) spEl.textContent = fmtNum(sp);
+  }
+
+  // Живая сводка: заголовок блока и строки аккаунтов.
+  function recalcTotals() {
+    let accts = 0, chars = 0, sp = 0;
+    document.querySelectorAll('.acctfold').forEach((d, i) => {
+      const acb = d.querySelector('input[name=acct]');
+      if (acb && acb.checked) accts++;
+      let selC = 0, selSP = 0;
+      const all = d.querySelectorAll('input[name=char]');
+      all.forEach(cb => {
+        if (!cb.checked) return;
+        const card = cb.closest('.charcard');
+        selC++;
+        selSP += parseFloat(card && card.dataset.spyear) || 0;
+      });
+      chars += selC; sp += selSP;
+      const sum = document.getElementById('acctsum-' + i);
+      if (sum) {
+        sum.textContent = 'выбрано ' + selC + ' из ' + all.length +
+          (selC ? ' · ≈ ' + fmtNum(selSP) + ' SP/год' : '');
+      }
+    });
+    const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    set('sum-accts', accts);
+    set('sum-chars', chars);
+    set('sum-sp', fmtNum(sp));
+  }
+  document.querySelectorAll('input[name=char], input[name=acct]').forEach(cb =>
+    cb.addEventListener('change', recalcTotals));
+
+  // Ревалидация ESI подменяет #main целиком и сворачивала открытые
+  // аккаунты — раскрытые ключи живут в sessionStorage и восстанавливаются
+  // при каждом перерендере страницы.
+  const OPEN_KEY = 'spfarm_open_accts';
+  let openSet;
+  try { openSet = new Set(JSON.parse(sessionStorage.getItem(OPEN_KEY) || '[]')); } catch (e) { openSet = new Set(); }
+  document.querySelectorAll('.acctfold').forEach(d => {
+    const k = d.dataset.key || '';
+    if (openSet.has(k)) d.open = true;
+    d.addEventListener('toggle', () => {
+      if (d.open) openSet.add(k); else openSet.delete(k);
+      try { sessionStorage.setItem(OPEN_KEY, JSON.stringify([...openSet])); } catch (e) {}
+    });
+  });
+
+  const dlg = document.getElementById('pooldlg');
+  const sel = document.getElementById('pool-plans');
+  const text = document.getElementById('pool-text');
+  const charLabel = document.getElementById('pool-char');
+  let charID = 0;
+
+  function renderPlans() {
+    sel.innerHTML = '<option value="">— вставить план прокачки —</option>';
+    for (const p of PLANS) {
+      const o = document.createElement('option');
+      o.value = p.ID;
+      o.textContent = p.Name;
+      sel.appendChild(o);
+    }
+  }
+  renderPlans();
+
+  window.openPool = function (btn) {
+    charID = btn.dataset.char;
+    charLabel.textContent = btn.dataset.name;
+    document.getElementById('pool-portrait').src =
+      'https://images.evetech.net/characters/' + charID + '/portrait?size=64';
+    text.value = document.getElementById('pool-' + charID).value;
+    sel.value = '';
+    dlg.showModal();
+  };
+
+  sel.addEventListener('change', () => {
+    const p = PLANS.find(p => String(p.ID) === sel.value);
+    if (p) text.value = p.Body;
+  });
+
+  document.getElementById('pool-apply').addEventListener('click', () => {
+    document.getElementById('pool-' + charID).value = text.value;
+    const cnt = document.getElementById('poolcnt-' + charID);
+    if (cnt) cnt.textContent = text.value.split('\n').filter(l => l.trim()).length;
+    evalChar(charID);
+    recalcTotals();
+    dlg.close();
+  });
+  document.getElementById('pool-cancel').addEventListener('click', () => dlg.close());
+
+  document.getElementById('pool-save-plan').addEventListener('click', async () => {
+    if (!text.value.trim()) { alert('Список навыков пуст.'); return; }
+    const name = prompt('Название плана:');
+    if (!name) return;
+    const resp = await fetch('/tools/spfarm/plan/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'name=' + encodeURIComponent(name) + '&body=' + encodeURIComponent(text.value),
+    });
+    if (!resp.ok) { alert('Не удалось сохранить план.'); return; }
+    const id = parseInt(await resp.text(), 10);
+    PLANS.push({ ID: id, Name: name, Body: text.value });
+    renderPlans();
+    sel.value = id;
+  });
+
+  document.getElementById('pool-del-plan').addEventListener('click', async () => {
+    const p = PLANS.find(p => String(p.ID) === sel.value);
+    if (!p) { alert('Выбери план в списке.'); return; }
+    if (!confirm('Удалить план «' + p.Name + '»?')) return;
+    const resp = await fetch('/tools/spfarm/plan/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'id=' + encodeURIComponent(p.ID),
+    });
+    if (!resp.ok) { alert('Не удалось удалить план.'); return; }
+    PLANS = PLANS.filter(q => q !== p);
+    renderPlans();
+  });
+})();
+</script>
+{{end}}

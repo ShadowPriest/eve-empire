@@ -1,0 +1,310 @@
+{{define "content"}}
+<div class="zoom75">
+<h1>SP-ферма</h1>
+<nav class="tabs">
+  <a class="active">SP-ферма</a>
+  <a href="/tools/spfarm/model">Модель фермы</a>
+  <a href="/tools/plex">Хранилище PLEX</a>
+</nav>
+
+{{if .Err}}<p class="err">{{.Err}}</p>{{end}}
+
+{{/* ── вердикт ── */}}
+{{with .Calc}}
+<div class="card">
+  {{if .Ready}}
+  <div class="verdict">
+    <div class="vcol vfix" style="flex:0 0 400px;">
+      <p class="vhead">Вердикт</p>
+      <p class="vbig {{if gt .ProfitTotal 0.0}}pos{{else}}neg{{end}}" id="v-status">
+        {{if gt .ProfitTotal 0.0}}Ферма окупается{{else}}Ферма не окупается{{end}}</p>
+      <p class="knote" style="font-size:.85rem; white-space:nowrap;"><span id="v-total">{{iskshort .ProfitTotal}}</span> в год на {{.Accounts}} окон ·
+        <span id="v-acc" class="{{if gt .ProfitAcc 0.0}}pos{{else}}neg{{end}}">{{iskshort .ProfitAcc}}</span> на аккаунт
+        {{if .Live}}<span class="rb pos" title="скорости взяты из живой очереди навыков фермы">live</span>{{end}}</p>
+    </div>
+    <div class="vcol vsep">
+      <p class="vhead">Порог окупаемости</p>
+      <p class="knote" style="font-size:.95rem; margin-top:.4rem;">PLEX ≤ <b style="color:#e8eef7;" id="v-be">{{unitprice .BreakEven}}</b>
+        <span class="muted">· в расчёте <span id="v-now">{{unitprice .PlexPrice}}</span></span>
+        <span id="v-note" class="{{if le .PlexPrice .BreakEven}}pos{{else}}buy{{end}}">{{if le .PlexPrice .BreakEven}}— цена ниже порога{{else}}— дороже порога{{end}}</span></p>
+      {{if .HasRange}}
+      <div class="rangebar" title="полоса — цена PLEX в расчёте относительно диапазона года; красная риска — порог окупаемости">
+        <i id="v-bar-fill" style="width:{{printf "%.1f" .BarPos}}%;"></i>
+        <b id="v-bar-tick" style="left:{{printf "%.1f" .TickPos}}%;"></b>
+      </div>
+      <p class="knote muted">цена PLEX в диапазоне года · красная риска — порог окупаемости</p>
+      {{end}}
+    </div>
+    <div class="vcol vfix" style="display:flex; flex-direction:column; gap:.5rem; justify-content:center;">
+      <span class="rb">{{printf "%.1f" .Injectors}} инжекторов/год с аккаунта</span>
+      <span class="rb">спред на извлечение <span id="v-spread" class="{{if gt .Spread 0.0}}pos{{else}}neg{{end}}">{{iskshort .Spread}}</span></span>
+      <span class="rb">{{iskraw .PlexYear}} PLEX на ферму в год</span>
+    </div>
+  </div>
+  {{else}}
+  <p class="knote muted">Не удалось получить все три цены — вердикт появится после обновления страницы.</p>
+  {{end}}
+</div>
+{{end}}
+
+{{/* ── цены слева, график профита справа ── */}}
+<div class="farmlayout">
+  <div class="farmprices">
+    {{range .Goods}}
+    <div class="card">
+      <div class="frow" style="justify-content:space-between; align-items:baseline;">
+        <p class="klabel" style="margin:0;">{{item .TypeID .Name}}</p>
+        {{if .Badge}}<span class="rb {{.BadgeClass}}" title="за год: мин {{unitprice .YearMin}} · макс {{unitprice .YearMax}}">{{.Badge}}</span>{{end}}
+      </div>
+      <div class="pricepick">
+        <label class="prow" title="цена продажи (нижний селл-ордер)">
+          <input type="radio" name="pick-{{.Key}}" value="sell"{{if ne .Side "buy"}} checked{{end}}>
+          <span class="pv sell">{{unitprice .Stats.SellMin}}</span>
+        </label>
+        <label class="prow" title="цена скупки (верхний бай-ордер)">
+          <input type="radio" name="pick-{{.Key}}" value="buy"{{if eq .Side "buy"}} checked{{end}}>
+          <span class="pv buy">{{unitprice .Stats.BuyMax}}</span>
+        </label>
+        <label class="prow" title="своя цена — что будет с профитом при такой цене; не сохраняется">
+          <input type="radio" name="pick-{{.Key}}" value="custom">
+          <input type="text" data-custom="{{.Key}}" placeholder="своя цена" autocomplete="off">
+        </label>
+      </div>
+      {{if .HasHist}}
+      {{.Spark}}
+      {{else}}
+      <p class="knote muted" style="margin-top:.6rem;">истории пока нет</p>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+
+  {{if .ProfitChart}}
+  <div class="card farmchart">
+    <div class="frow" style="justify-content:space-between;">
+      <p class="klabel" style="margin:0;">Профит фермы в год по дневным ценам
+        <span class="muted" style="font-size:.78rem;">· {{.ProfitNote}} · по средним ценам дня</span></p>
+      <div class="frow otoggles">
+        {{range .DayOptions}}
+        <a class="tog{{if eq . $.Days}} on{{end}}" href="?d={{.}}">{{.}} дн.</a>
+        {{end}}
+      </div>
+    </div>
+    <div class="fchartwrap" id="fchartwrap">{{.ProfitChart}}</div>
+  </div>
+  {{end}}
+</div>
+
+{{/* ── статистика персонажей фермы: пул и AIR ── */}}
+{{if .FarmStats}}
+<div class="card" style="margin-top:1rem;">
+  <p class="klabel" style="margin-top:0;">Персонажи фермы
+    <span class="muted" style="font-size:.78rem;">· выучено SP по навыкам из пула персонажа и получено от AIR в {{.Year}} году</span></p>
+  <table style="margin-top:.6rem; max-width:1000px;">
+    <tr>
+      <th>Персонаж</th>
+      <th>Тренирует</th>
+      <th class="r">SP из пула выучено</th>
+      <th class="r">Навыков пула изучается</th>
+      <th class="r">AIR за {{.Year}}</th>
+    </tr>
+    {{range .FarmStats}}
+    <tr>
+      <td>
+        <span style="display:inline-flex; align-items:center; gap:.5rem;">
+          <img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=32" alt="" loading="lazy"
+               style="width:24px; height:24px; border-radius:5px; border:1px solid #1b2436;">
+          <b style="color:#e8eef7;">{{.Name}}</b>
+        </span>
+      </td>
+      <td>
+        {{if .Paused}}
+        <span class="rb warn" title="очередь навыков пуста или на паузе">пауза</span>
+        {{else}}
+        <span class="rb{{if .InPool}} pos{{end}}" title="{{if .InPool}}навык из пула{{else}}тренируемый навык не из пула{{end}}">{{.Skill}} · {{sprate .Rate}}</span>
+        {{end}}
+      </td>
+      <td class="r">{{num .PoolSP}}</td>
+      <td class="r muted">{{.PoolKnown}} из {{.PoolTotal}}</td>
+      <td class="r">{{num .AirSP}}</td>
+    </tr>
+    {{end}}
+  </table>
+  <p class="knote muted" style="margin-top:.5rem;">SP из пула — сумма очков в уже изученных навыках пула;
+    AIR — закрытые месяцы этого года плюс текущий прогресс со страницы AIR.</p>
+</div>
+{{end}}
+
+</div>
+
+<script>
+(function () {
+  const F = {{.FarmJSON}};
+  if (!F || !F.goods) return;
+
+  const fmtNum = v => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ').replace(/ /g, ' ');
+  const iskShort = v => {
+    const a = Math.abs(v);
+    if (a >= 1e9) return (v / 1e9).toFixed(1) + 'B ISK';
+    if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M ISK';
+    if (a >= 1e3) return (v / 1e3).toFixed(1) + 'K ISK';
+    return Math.round(v) + ' ISK';
+  };
+  const el = id => document.getElementById(id);
+  const clampPct = v => Math.max(0, Math.min(100, v));
+
+  function pickPrice(key) {
+    const sel = document.querySelector(`input[name=pick-${key}]:checked`);
+    if (!sel) return 0;
+    if (sel.value === 'custom') {
+      const raw = (document.querySelector(`[data-custom=${key}]`).value || '')
+        .replace(/[\s ]/g, '').replace(',', '.');
+      const v = parseFloat(raw);
+      return v > 0 ? v : 0;
+    }
+    return F.goods[key][sel.value] || 0;
+  }
+
+  function setSigned(node, v, fmt) {
+    if (!node) return;
+    node.textContent = fmt(v);
+    node.classList.toggle('pos', v > 0);
+    node.classList.toggle('neg', v <= 0);
+  }
+
+  // Перерисовка графика профита: товар со «своей ценой» считается по
+  // ней как по константе, остальные — по дневной истории (у истории нет
+  // сторон стакана, только средняя цена дня).
+  function drawProfit(customs) {
+    const H = F.hist;
+    const wrap = document.getElementById('fchartwrap');
+    if (!H || !H.dates || H.dates.length < 2 || !wrap) return;
+    const injectors = F.spTotal / 500000;
+    const plexYear = F.perPlex * F.accounts;
+    const profits = H.dates.map((_, i) => {
+      const plex = customs.plex ?? H.plex[i];
+      const ext = customs.ext ?? H.ext[i];
+      const inj = customs.inj ?? H.inj[i];
+      return injectors * (inj * (1 - F.tax / 100) - ext) - plexYear * plex;
+    });
+
+    const W = 1000, HT = 470, PAD = 14, TOP = 12, BOT = 430;
+    let vmin = Math.min(...profits), vmax = Math.max(...profits);
+    if (vmax <= vmin) vmax = vmin + 1;
+    const span = vmax - vmin;
+    vmin -= span * .06; vmax += span * .06;
+    const x = i => PAD + i * (W - 2 * PAD) / (profits.length - 1);
+    const y = v => BOT - (v - vmin) / (vmax - vmin) * (BOT - TOP);
+
+    let s = `<svg class="fchart" viewBox="0 0 ${W} ${HT}" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">`;
+    for (let i = 0; i <= 4; i++) {
+      const v = vmin + (vmax - vmin) * i / 4;
+      s += `<line x1="${PAD}" y1="${y(v).toFixed(1)}" x2="${W - PAD}" y2="${y(v).toFixed(1)}" stroke="#1c2536" stroke-dasharray="4 4"/>`
+        + `<text x="${W - PAD - 4}" y="${(y(v) - 3).toFixed(1)}" font-size="11" fill="#5f708c" text-anchor="end">${iskShort(v)}</text>`;
+    }
+    if (vmin < 0 && vmax > 0) {
+      s += `<rect x="${PAD}" y="${y(0).toFixed(1)}" width="${W - 2 * PAD}" height="${(BOT - y(0)).toFixed(1)}" fill="rgba(224,108,108,.05)"/>`
+        + `<line x1="${PAD}" y1="${y(0).toFixed(1)}" x2="${W - PAD}" y2="${y(0).toFixed(1)}" stroke="#e06c6c" stroke-dasharray="6 4"/>`
+        + `<text x="${PAD + 6}" y="${(y(0) + 14).toFixed(1)}" font-size="11" fill="#e06c6c">зона убытка</text>`;
+    }
+    const RUM = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+    let prev = -1;
+    H.dates.forEach((d, i) => {
+      const m = parseInt(d.slice(5, 7), 10);
+      if (m !== prev) {
+        if (prev !== -1) {
+          s += `<line x1="${x(i).toFixed(1)}" y1="${TOP}" x2="${x(i).toFixed(1)}" y2="${BOT}" stroke="#1c2536"/>`
+            + `<text x="${x(i).toFixed(1)}" y="${BOT + 16}" font-size="11" fill="#5f708c" text-anchor="middle">${RUM[m - 1]}</text>`;
+        }
+        prev = m;
+      }
+    });
+    const base = y(Math.max(0, vmin));
+    const line = profits.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    s += `<polygon points="${line} ${x(profits.length - 1).toFixed(1)},${base.toFixed(1)} ${x(0).toFixed(1)},${base.toFixed(1)}" fill="rgba(95,211,141,.08)"/>`
+      + `<polyline points="${line}" fill="none" stroke="#5fd38d" stroke-width="1.6"/>`;
+    const lastV = profits[profits.length - 1];
+    s += `<circle cx="${x(profits.length - 1).toFixed(1)}" cy="${y(lastV).toFixed(1)}" r="3.5" fill="${lastV < 0 ? '#e06c6c' : '#5fd38d'}"/></svg>`;
+    wrap.innerHTML = s;
+  }
+
+  function recalc() {
+    const plex = pickPrice('plex'), ext = pickPrice('ext'), inj = pickPrice('inj');
+    if (!(plex > 0 && ext > 0 && inj > 0)) return;
+    const injectors = F.spTotal / 500000;
+    const spread = inj * (1 - F.tax / 100) - ext;
+    const revenue = injectors * spread;
+    const plexYear = F.perPlex * F.accounts;
+    const total = revenue - plexYear * plex;
+    const acc = total / Math.max(1, F.accounts);
+    const be = plexYear > 0 ? revenue / plexYear : 0;
+
+    const st = el('v-status');
+    if (st) {
+      st.textContent = total > 0 ? 'Ферма окупается' : 'Ферма не окупается';
+      st.classList.toggle('pos', total > 0);
+      st.classList.toggle('neg', total <= 0);
+    }
+    setSigned(el('v-total'), total, iskShort);
+    setSigned(el('v-acc'), acc, iskShort);
+    setSigned(el('v-spread'), spread, iskShort);
+    if (el('v-be')) el('v-be').textContent = fmtNum(be);
+    if (el('v-now')) el('v-now').textContent = fmtNum(plex);
+    const note = el('v-note');
+    if (note) {
+      note.textContent = plex <= be ? '— цена ниже порога' : '— дороже порога';
+      note.classList.toggle('pos', plex <= be);
+      note.classList.toggle('buy', plex > be);
+    }
+    if (F.plexHi > F.plexLo) {
+      const fill = el('v-bar-fill'), tick = el('v-bar-tick');
+      if (fill) fill.style.width = clampPct((plex - F.plexLo) / (F.plexHi - F.plexLo) * 100) + '%';
+      if (tick) tick.style.left = clampPct((be - F.plexLo) / (F.plexHi - F.plexLo) * 100) + '%';
+    }
+
+    const customs = {};
+    for (const k of ['plex', 'ext', 'inj']) {
+      customs[k] = null;
+      const sel = document.querySelector(`input[name=pick-${k}]:checked`);
+      if (sel && sel.value === 'custom') {
+        const raw = (document.querySelector(`[data-custom=${k}]`).value || '')
+          .replace(/[\s ]/g, '').replace(',', '.');
+        const v = parseFloat(raw);
+        if (v > 0) customs[k] = v;
+      }
+    }
+    drawProfit(customs);
+  }
+
+  for (const key of ['plex', 'ext', 'inj']) {
+    document.querySelectorAll(`input[name=pick-${key}]`).forEach(radio => {
+      radio.addEventListener('change', () => {
+        if (radio.value !== 'custom') {
+          // Выбранная сторона — настройка, она переживает перезагрузку.
+          fetch('/tools/spfarm/side', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `good=${key}&side=${radio.value}`,
+          }).catch(() => {});
+          const sel = document.querySelector(`select[name=${key === 'plex' ? 'plex_side' : key + '_side'}]`);
+          if (sel) sel.value = radio.value;
+        }
+        recalc();
+      });
+    });
+    const custom = document.querySelector(`[data-custom=${key}]`);
+    if (custom) {
+      custom.addEventListener('input', () => {
+        const radio = document.querySelector(`input[name=pick-${key}][value=custom]`);
+        if (radio && !radio.checked) radio.checked = true;
+        recalc();
+      });
+      custom.addEventListener('focus', () => {
+        const radio = document.querySelector(`input[name=pick-${key}][value=custom]`);
+        if (radio && !radio.checked) { radio.checked = true; recalc(); }
+      });
+    }
+  }
+})();
+</script>
+{{end}}

@@ -1,0 +1,171 @@
+{{define "content"}}
+{{template "empiretabs" "air"}}
+
+<style>
+  .airctl { display:flex; align-items:center; gap:1rem; flex-wrap:wrap; margin-top:.8rem;
+            padding-top:.8rem; border-top:1px solid #1f2a3d; }
+  .airctl form { display:flex; align-items:center; gap:.5rem; margin:0; }
+  .airbtn { background:#1a2d4d; border:1px solid #4da3ff; color:#4da3ff; border-radius:6px;
+            padding:.35rem .8rem; cursor:pointer; font-size:.85rem; }
+  .airbtn:hover { background:#22395f; }
+  .airbtn.warn { border-color:#e0b25f; color:#e0b25f; background:#2d2716; }
+  .airbtn.warn:hover { background:#3a3119; }
+
+  .airrow { display:flex; align-items:center; flex-wrap:wrap; gap:.5rem 1rem;
+            padding:.55rem 1rem; margin:.4rem 0; }
+  .airrow img { width:48px; height:48px; border-radius:6px; flex:none; }
+  .airinfo { flex:0 0 185px; min-width:0; }
+  .airtiles { display:flex; flex-direction:column; gap:6px; }
+  .airdays { display:flex; gap:3px; }
+  .at { width:15px; height:15px; flex:none; box-sizing:border-box; background:#0b0e14;
+        border:1px solid #26324a; border-radius:3px; cursor:pointer; }
+  .at:hover { border-color:#3fd0c9; }
+  .at.on { background:#17635e; border-color:#3fd0c9; }
+  .at.ms { transform:rotate(45deg) scale(.8); border-radius:2px; }
+  .at.fin { border-color:#8a774a; border-width:2px; }
+  .at.fin.on { border-color:#e0b25f; }
+  .airmonths { display:flex; gap:3px; }
+  .am { position:relative; width:33px; height:20px; flex:none; box-sizing:border-box;
+        background:#0b0e14; border:1px solid #26324a; border-radius:3px; cursor:pointer;
+        overflow:hidden; }
+  .am:hover { border-color:#3fd0c9; }
+  .am i { position:absolute; left:0; right:0; bottom:0; height:0; background:#17635e; }
+  .am.cur { border-color:#3fd0c9; box-shadow:0 0 5px #3fd0c955; }
+  .am.future { opacity:.45; }
+  .am b { position:relative; display:block; text-align:center; font-size:.62rem;
+          line-height:17px; color:#7b8aa0; font-weight:600; }
+  .am.cur b { color:#e8eef7; }
+  .airsp { margin-left:auto; flex:none; text-align:right; }
+  .airsp .kval { font-size:1rem; }
+</style>
+
+{{range .Errors}}<p class="err">{{.}}</p>{{end}}
+
+<div class="card phead">
+  <div class="pheadstats">
+    <div class="pstat">
+      <p class="klabel">SP за текущий месяц</p>
+      <p class="kval pos">{{num .LiveTotal}}</p>
+      <p class="knote muted">по выставленным плиткам, до закрытия</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Финальная награда</p>
+      <p class="kval {{if lt .Finals (len .Chars)}}neg{{else}}pos{{end}}">{{.Finals}}/{{len .Chars}}</p>
+      <p class="knote muted">альтов дошло до 15-го дня</p>
+    </div>
+    <div class="pstat">
+      <p class="klabel">Новый месяц начнётся</p>
+      {{if .ResetAt.IsZero}}
+      <p class="kval muted">—</p>
+      <p class="knote muted">таймер не настроен</p>
+      {{else}}
+      <p class="kval"><b data-countdown="{{.ResetAt.Format "2006-01-02T15:04:05Z07:00"}}">…</b></p>
+      <p class="knote muted">{{.ResetAt.Format "02.01.2006 15:04"}} EVE · закроется автоматически</p>
+      {{end}}
+    </div>
+  </div>
+  <div class="airctl">
+    <form method="post" action="/air/reset">
+      <span class="knote muted">Осталось в игре:</span>
+      <input type="text" name="left" placeholder="28д 1ч 2мин" size="14"
+             title="Остаток до обновления шкалы, как его показывает игра. Пусто — выключить таймер.">
+      <button class="airbtn" type="submit">Синхронизировать</button>
+    </form>
+    <form method="post" action="/air/close"
+          onsubmit="return confirm('Записать результат месяца по всем персонажам и начать новый? Счётчики дней обнулятся.')">
+      <button class="airbtn warn" type="submit">Начать новый месяц</button>
+    </form>
+  </div>
+</div>
+
+{{range .Chars}}
+<div class="card airrow" data-char="{{.ID}}" data-days="{{.Days}}" data-month="{{.MonthNo}}"
+     data-omega="{{if .Omega}}1{{else}}0{{end}}">
+  <img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=64" alt=""
+       class="{{if .Online}}online{{end}}">
+  <div class="airinfo">
+    <p class="trnm2 ell"><a class="alink" href="/characters/{{.ID}}">{{.Name}}</a></p>
+    <p class="knote muted ell">{{if .Omega}}<span class="pos" title="омега активна">Ω</span>{{else}}<span title="альфа">α</span>{{end}}{{if .Account}} · {{.Account}}{{end}}</p>
+    {{if .WalletDays}}
+    <p class="knote ell {{if lt .WalletDays .Days}}muted{{else}}pos{{end}}"
+       title="дневные пункты AIR по журналам валетов (личному и корповому) за этот месяц; счётчик поднимается по ним автоматически, но валет может недосчитать (сбор журналов не с начала месяца, мёртвые токены)">валет: {{.WalletDays}} дн.</p>
+    {{end}}
+  </div>
+  <div class="airtiles">
+    <div class="airdays">
+      {{$row := .}}
+      {{range $.DayTiles}}
+      <span class="at{{if le .N $row.Days}} on{{end}}{{if .Milestone}} ms{{end}}{{if .Final}} fin{{end}}"
+            data-n="{{.N}}" title="День {{.N}}{{if .Final}} — финальная награда{{end}}"></span>
+      {{end}}
+    </div>
+    <div class="airmonths">
+      {{range .Months}}
+      <span class="am {{.State}}" data-n="{{.No}}" data-hist="{{.HistFill}}" title="{{.Title}}"><i style="height:{{.Fill}}%"></i><b>{{.No}}</b></span>
+      {{end}}
+    </div>
+  </div>
+  <div class="airsp">
+    <p class="kval airlive"><b>{{num .LiveSP}}</b> <span class="muted" style="font-size:.8rem;">SP</span></p>
+    <p class="knote muted">текущий месяц · <b>{{num .YearSP}}</b> SP за закрытые</p>
+  </div>
+</div>
+{{end}}
+
+<script>
+(function () {
+  const SP_DAY = 10000, FIN_DAY = 15, FIN_SP = 75000, FIN_OMEGA = 150000, DAYS = 30;
+  const fmt = v => v.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  const monthSP = (d, omega) => d * SP_DAY + (d >= FIN_DAY ? FIN_SP + (omega ? FIN_OMEGA : 0) : 0);
+
+  async function save(url, body) {
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      });
+      return r.ok;
+    } catch { return false; }
+  }
+
+  document.querySelectorAll('.airrow').forEach(row => {
+    const id = row.dataset.char;
+    const dayTiles = row.querySelectorAll('.at');
+    const monthTiles = row.querySelectorAll('.am');
+
+    function paint() {
+      const days = +row.dataset.days, month = +row.dataset.month;
+      dayTiles.forEach(t => t.classList.toggle('on', +t.dataset.n <= days));
+      monthTiles.forEach(t => {
+        const n = +t.dataset.n;
+        t.classList.remove('past', 'cur', 'future');
+        let fill = +(t.dataset.hist || 0);
+        if (n === month) { t.classList.add('cur'); fill = Math.round(days * 100 / DAYS); }
+        else if (n < month) t.classList.add('past');
+        else { t.classList.add('future'); fill = 0; }
+        t.querySelector('i').style.height = fill + '%';
+      });
+      row.querySelector('.airlive b').textContent = fmt(monthSP(days, row.dataset.omega === '1'));
+    }
+
+    dayTiles.forEach(t => t.addEventListener('click', async () => {
+      const n = +t.dataset.n, cur = +row.dataset.days;
+      const target = (n === cur) ? n - 1 : n; // повторный клик по последней — минус день
+      if (await save('/air/days', `char=${id}&days=${target}`)) {
+        row.dataset.days = target;
+        paint();
+      }
+    }));
+    monthTiles.forEach(t => t.addEventListener('click', async () => {
+      const n = +t.dataset.n;
+      if (n === +row.dataset.month) return;
+      if (await save('/air/month', `char=${id}&month=${n}`)) {
+        row.dataset.month = n;
+        paint();
+      }
+    }));
+  });
+})();
+</script>
+{{end}}

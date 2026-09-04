@@ -262,7 +262,7 @@ func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *s
 		"settings", "skill_planner", "clones", "blueprints", "planetary_tool", "planets",
 		"empire_planets", "empire_wallets", "empire_training", "empire_industry", "fleet",
 		"mining", "ore", "market_watch", "build", "orders", "mail", "empire_structures",
-		"reauth", "accounting",
+		"reauth", "accounting", "spfarm", "spfarm_model", "plex_vault", "empire_air",
 	} {
 		t, err := template.Must(layout.Clone()).ParseFS(templateFS, "templates/"+name+".html")
 		if err != nil {
@@ -287,6 +287,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /mining", s.handleEmpireMining)
 	mux.HandleFunc("GET /wallets", s.handleEmpireWallets)
 	mux.HandleFunc("GET /training", s.handleEmpireTraining)
+	mux.HandleFunc("GET /air", s.handleAIR)
+	mux.HandleFunc("POST /air/days", s.handleAIRDays)
+	mux.HandleFunc("POST /air/month", s.handleAIRMonth)
+	mux.HandleFunc("POST /air/close", s.handleAIRClose)
+	mux.HandleFunc("POST /air/reset", s.handleAIRReset)
 	mux.HandleFunc("GET /industry", s.handleEmpireIndustry)
 	mux.HandleFunc("GET /structures", s.handleEmpireStructures)
 	mux.HandleFunc("GET /tools/fleet", s.handleFleetTool)
@@ -296,6 +301,19 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /tools/market", s.handleMarketWatch)
 	mux.HandleFunc("GET /tools/orders", s.handleOrdersTool)
 	mux.HandleFunc("GET /tools/build", s.handleBuildCalc)
+	mux.HandleFunc("GET /tools/spfarm", s.handleSPFarm)
+	mux.HandleFunc("POST /tools/spfarm/params", s.handleSPFarmParams)
+	mux.HandleFunc("POST /tools/spfarm/side", s.handleSPFarmSide)
+	mux.HandleFunc("GET /tools/spfarm/model", s.handleSPFarmModel)
+	mux.HandleFunc("POST /tools/spfarm/roster", s.handleSPFarmRoster)
+	mux.HandleFunc("POST /tools/spfarm/offer/add", s.handleSPFarmOfferAdd)
+	mux.HandleFunc("POST /tools/spfarm/offer/delete", s.handleSPFarmOfferDelete)
+	mux.HandleFunc("POST /tools/spfarm/offer/select", s.handleSPFarmOfferSelect)
+	mux.HandleFunc("POST /tools/spfarm/plan/add", s.handleSPFarmPlanAdd)
+	mux.HandleFunc("POST /tools/spfarm/plan/delete", s.handleSPFarmPlanDelete)
+	mux.HandleFunc("GET /tools/plex", s.handlePlexVault)
+	mux.HandleFunc("POST /tools/plex/buy", s.handleSPFarmBuy)
+	mux.HandleFunc("POST /tools/plex/buy/delete", s.handleSPFarmBuyDelete)
 	mux.HandleFunc("GET /tools/skill-planner", s.handleSkillPlanner)
 	mux.HandleFunc("POST /tools/skill-planner", s.handleSkillPlanner)
 	mux.HandleFunc("POST /tools/skill-planner/save", s.handleSkillPlanSave)

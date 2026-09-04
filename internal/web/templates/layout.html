@@ -1184,6 +1184,64 @@
   .knote { margin: .3rem 0 0; font-size: .75rem; }
   .knote a, a.alink { color: #4da3ff; text-decoration: none; }
   .frow { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+
+  /* ── SP-ферма: вердикт, диапазонные бейджи, чипы ── */
+  .verdict { display: flex; gap: 1.6rem; align-items: stretch; flex-wrap: wrap; }
+  .verdict .vcol { flex: 1 1 280px; min-width: 0; }
+  .verdict .vfix { flex: 0 1 auto; }
+  .verdict .vsep { border-left: 1px solid #1b2436; padding-left: 1.6rem; }
+  .vhead { margin: 0; font-size: .72rem; color: #7b8aa0; text-transform: uppercase; letter-spacing: .06em; }
+  .vbig { margin: .4rem 0 0; font-size: 1.5rem; font-weight: 300; color: #e8eef7; white-space: nowrap; }
+  .vbig.pos { color: #5fd38d; }
+  .vbig.neg { color: #e06c6c; }
+  .rangebar { position: relative; height: 8px; background: #0b0e14; border: 1px solid #1b2436; border-radius: 4px; margin-top: .8rem; }
+  .rangebar i { position: absolute; left: 0; top: 0; bottom: 0; background: #4da3ff; opacity: .55; border-radius: 4px; }
+  .rangebar b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: #e06c6c; }
+  .rb {
+    display: inline-block; padding: .12rem .5rem; border-radius: 999px;
+    font-size: .7rem; border: 1px solid #2a3a55; color: #9fb2ca; white-space: nowrap;
+  }
+  .rb.pos { border-color: #5fd38d; color: #5fd38d; }
+  .rb.warn { border-color: #e0b25f; color: #e0b25f; }
+  .chipline { display: flex; gap: .45rem; flex-wrap: wrap; }
+  /* SP-ферма выстроена под плотность рыночных таблиц: всё на четверть
+     мельче обычных страниц кабинета (просьба владельца). */
+  .zoom75 { zoom: .75; }
+  /* Вкладки и заголовок остаются обычного размера: компенсация зума. */
+  .zoom75 .tabs a { font-size: 1.135rem; }
+  .zoom75 > h1 { font-size: 2.135rem; }
+  .farmlayout { display: flex; gap: 1.2rem; align-items: stretch; flex-wrap: wrap; margin-top: 1rem; }
+  .farmprices { flex: 0 1 450px; min-width: 320px; display: flex; flex-direction: column; gap: 1.2rem; }
+  .farmprices .card { margin: 0; }
+  .farmchart { margin: 0; flex: 1 1 480px; min-width: 0; display: flex; flex-direction: column; }
+  /* График абсолютный, чтобы не диктовать карточке высоту: блок графика
+     подстраивается под высоту колонки цен, а не наоборот. */
+  .fchartwrap { flex: 1; min-height: 280px; position: relative; }
+  .fchartwrap .fchart { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .pricepick { margin-top: .6rem; display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+  .prow { display: flex; align-items: center; gap: .45rem; cursor: pointer; }
+  .prow input[type=radio] { accent-color: #4da3ff; margin: 0; flex: none; }
+  .prow .pv { font-size: 1.05rem; color: #e8eef7; line-height: 1.15; }
+  .prow .pv.sell { color: #5fd38d; }
+  .prow .pv.buy { color: #e0b25f; }
+  .prow:has(input:not(:checked)) .pv { opacity: .45; }
+  .prow input[type=text] { width: 7rem; font-size: .85rem; }
+  .pdetails > summary { list-style: none; display: inline-block; }
+  .pdetails > summary::-webkit-details-marker { display: none; }
+  /* сворачиваемые аккаунты на странице модели фермы */
+  .acctfold { border: 1px solid #1b2436; border-radius: 8px; padding: .55rem .9rem; }
+  .acctfold > summary { cursor: pointer; display: flex; gap: .7rem; align-items: center; list-style: none; }
+  .acctfold > summary::-webkit-details-marker { display: none; }
+  .acctfold .foldarrow { display: inline-block; color: #7b8aa0; transition: transform .15s; font-style: normal; }
+  .acctfold[open] .foldarrow { transform: rotate(90deg); }
+  .chargear {
+    position: absolute; top: .4rem; right: .45rem; background: none; border: none;
+    cursor: pointer; color: #7b8aa0; font-size: 1.05rem; line-height: 1;
+    padding: .15rem .3rem; border-radius: 6px; font-family: inherit;
+  }
+  .chargear:hover { color: #e8eef7; background: #1a2438; }
+  .charsgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: .8rem; }
+  @media (max-width: 1100px) { .charsgrid { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); } }
   td.ell {
     max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
@@ -1531,6 +1589,8 @@
           <li><a class="subitem" href="/tools/orders">Ордера</a></li>
           <li class="subhead">Навыки</li>
           <li><a class="subitem" href="/tools/skill-planner">Планировщик навыков</a></li>
+          <li><a class="subitem" href="/tools/spfarm">SP-ферма</a></li>
+          <li><a class="subitem" href="/tools/plex">Хранилище PLEX</a></li>
           <li class="subhead">Флот</li>
           <li><a class="subitem" href="/tools/fleet">Управление флотом</a></li>
         </ul>
@@ -3466,6 +3526,7 @@
   <a href="/"{{if eq . "summary"}} class="active"{{end}}>Сводка</a>
   <a href="/wallets"{{if eq . "wallets"}} class="active"{{end}}>Кошельки</a>
   <a href="/training"{{if eq . "training"}} class="active"{{end}}>Обучение</a>
+  <a href="/air"{{if eq . "air"}} class="active"{{end}}>AIR</a>
   <a href="/industry"{{if eq . "industry"}} class="active"{{end}}>Производство</a>
   <a href="/planets"{{if eq . "planets"}} class="active"{{end}}>Планеты</a>
   <a href="/mining"{{if eq . "mining"}} class="active"{{end}}>Добыча</a>
