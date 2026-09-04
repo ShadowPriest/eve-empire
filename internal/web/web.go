@@ -351,6 +351,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /icons/{id}", s.handleIcon)
 	mux.HandleFunc("POST /sidebar/order", s.handleSidebarOrder)
 	mux.HandleFunc("POST /bulk/waypoint", s.handleBulkWaypoint)
+	mux.HandleFunc("GET /routes/tree", s.handleRouteTreeGet)
+	mux.HandleFunc("POST /routes/tree", s.handleRouteTreeSave)
 	return mux
 }
 
@@ -5321,7 +5323,7 @@ func (s *Server) handleBulkWaypoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	destID, err := s.ESI.ResolveSystem(req.System)
+	destID, resolved, err := s.ESI.ResolveDestination(req.System)
 	if err != nil {
 		writeJSON(w, map[string]any{"error": err.Error()})
 		return
@@ -5345,7 +5347,39 @@ func (s *Server) handleBulkWaypoint(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
-	writeJSON(w, map[string]any{"system": req.System, "results": results})
+	writeJSON(w, map[string]any{"system": resolved, "results": results})
+}
+
+// The quick-destination tree of the route modal: folders with system (or
+// station) names. Stored as one JSON blob — a single editor, tiny data.
+type routeFolder struct {
+	Name    string   `json:"name"`
+	Open    bool     `json:"open"`
+	Systems []string `json:"systems"`
+}
+
+func (s *Server) handleRouteTreeGet(w http.ResponseWriter, r *http.Request) {
+	tree := []routeFolder{}
+	if raw := s.Store.Setting("route_tree"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &tree); err != nil {
+			log.Printf("route_tree: битый JSON в настройках: %v", err)
+		}
+	}
+	writeJSON(w, tree)
+}
+
+func (s *Server) handleRouteTreeSave(w http.ResponseWriter, r *http.Request) {
+	var tree []routeFolder
+	if err := json.NewDecoder(r.Body).Decode(&tree); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	raw, _ := json.Marshal(tree)
+	if err := s.Store.SetSetting("route_tree", string(raw)); err != nil {
+		httpError(w, "saving route tree", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

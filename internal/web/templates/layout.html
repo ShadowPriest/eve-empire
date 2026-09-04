@@ -1447,6 +1447,41 @@
   .modal .routelist .st.err { color: #ff6b6b; }
   .modal .rclear { font-size: .8rem; color: #c9d4e3; display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
   .modal .rclear input { flex: none; }
+  .modal.routemodal { max-width: 800px; width: 92vw; }
+  .routemodal .rcols { display: flex; gap: 1rem; }
+  .routemodal .rleft { flex: 1.15; min-width: 0; }
+  .routemodal .rright { flex: 1; min-width: 0; border-left: 1px solid #1b2436; padding-left: 1rem; }
+  .routemodal .rtags { display: flex; flex-wrap: wrap; gap: .3rem; margin: .5rem 0 0; }
+  .routemodal .rquick .rcnt { margin-left: auto; color: #4da3ff; }
+  /* quick-destination tree */
+  .rtreehead { display: flex; align-items: center; justify-content: space-between;
+    font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: #5f708c; margin-top: .55rem; }
+  .rtree { max-height: 45vh; overflow-y: auto; margin-top: .4rem; font-size: .85rem; }
+  .rtree button, .rtreehead button { background: none; border: none; padding: 0 .25rem; font-size: .85rem;
+    color: #7b8aa0; cursor: pointer; line-height: 1.2; }
+  .rtree button:hover, .rtreehead button:hover { color: #fff; }
+  .rfold + .rfold { margin-top: .3rem; }
+  .rfhead { display: flex; align-items: center; gap: .4rem; cursor: pointer;
+    color: #c9d4e3; padding: .15rem .3rem; border-radius: 4px; }
+  .rfhead:hover { background: #1a2438; }
+  .rfhead .caret { font-style: normal; width: 10px; flex: none; color: #5f708c; transition: transform .12s; }
+  .rfhead .caret::before { content: "▾"; }
+  .rfold:not(.open) .rfhead .caret { transform: rotate(-90deg); }
+  .rfhead .racts { margin-left: auto; display: none; }
+  .rfhead:hover .racts { display: flex; gap: .1rem; }
+  .rfbody { display: none; margin: .1rem 0 .2rem 1.05rem; }
+  .rfold.open .rfbody { display: block; }
+  .rsys { display: flex; align-items: center; gap: .35rem; padding: .1rem .3rem; border-radius: 4px; color: #a9b6c9; }
+  .rsys:hover { background: #1a2438; }
+  .rsys .rs-go { color: #4da3ff; flex: none; }
+  .rsys .rs-go:hover { color: #8ec7ff; }
+  .rsys .rsname { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rsys .rsname:hover { color: #e8eef7; }
+  .rsys .rs-del { display: none; margin-left: auto; }
+  .rsys:hover .rs-del { display: inline; }
+  .rtree .rnew { margin: .15rem 0 .15rem 1.05rem; }
+  .rtree .rnew input { width: 100%; }
+  .rtree .rnew.top { margin-left: 0; }
   /* compact training row in the sidebar char cards */
   .char .tr.trq { display: flex; align-items: center; gap: .3rem; }
   .char .trq .sq { gap: 1px; }
@@ -3265,13 +3300,22 @@
 
   /* ── route modal: pick chars with checkboxes, set waypoint ──
      Waypoints land only in running clients, so online chars are
-     pre-checked; a Ctrl+click selection (bulkbar) overrides that. */
+     pre-checked; a Ctrl+click selection (bulkbar) overrides that.
+     The right column is the quick-destination tree: folders of systems
+     kept server-side (app_settings), ➤ fires the route right away. */
+  let routeTree = [];
+
+  function rEsc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  }
+
   function openRouteModal(preIDs) {
     const pre = preIDs && preIDs.length ? new Set(preIDs) : null;
     const rows = [...list.querySelectorAll('.char')].map(ch => {
       const id = Number(ch.dataset.id);
       const online = ch.dataset.online === '1';
-      return '<label class="' + (online ? 'on' : '') + '">' +
+      return '<label class="' + (online ? 'on' : '') + '" data-tags="' + rEsc(ch.dataset.tags || '') + '"' +
+        ' data-online="' + (online ? 1 : '') + '">' +
         '<input type="checkbox" data-id="' + id + '" data-online="' + (online ? 1 : '') + '"' +
         ((pre ? pre.has(id) : online) ? ' checked' : '') + '>' +
         '<img src="https://images.evetech.net/characters/' + id + '/portrait?size=32" alt="">' +
@@ -3279,63 +3323,242 @@
         (online ? '<i class="dot green" title="в игре"></i>' : '') +
         '<span class="st"></span></label>';
     });
+    // Same filter chips as the sidebar, starting from its current state.
+    const chips = [...cloud.querySelectorAll('.tag')].map(t =>
+      '<span class="tag' + (activeTags.has(t.dataset.tag) ? ' active' : '') + '" data-tag="' +
+      rEsc(t.dataset.tag) + '">' + rEsc(t.textContent) + '</span>');
+    modal.className = 'modal routemodal';
     modal.innerHTML = '<h3>Установить маршрут</h3>' +
-      '<div class="rquick">выбрать: ' +
-        '<button type="button" data-pick="online">онлайн</button>' +
-        '<button type="button" data-pick="all">всех</button>' +
-        '<button type="button" data-pick="none">никого</button></div>' +
-      '<div class="routelist">' + rows.join('') + '</div>' +
-      '<div class="mrow"><input type="text" id="routesys" placeholder="система назначения, например Jita"></div>' +
+      '<div class="rcols"><div class="rleft">' +
+        '<div class="rtags">' + chips.join('') + '</div>' +
+        '<div class="rquick">выбрать: ' +
+          '<button type="button" data-pick="online">онлайн</button>' +
+          '<button type="button" data-pick="all">всех</button>' +
+          '<button type="button" data-pick="none">никого</button>' +
+          '<span class="rcnt" id="rcnt"></span></div>' +
+        '<div class="routelist">' + rows.join('') + '</div>' +
+      '</div><div class="rright">' +
+        '<div class="rtreehead">Быстрые точки <button type="button" id="raddfold" title="добавить папку">+ папка</button></div>' +
+        '<div class="rtree" id="rtree"><span class="muted">загрузка…</span></div>' +
+      '</div></div>' +
+      '<form class="mrow" id="rsysform"><input type="text" id="routesys" placeholder="система или станция — можно скопировать из игры"></form>' +
       '<div class="mrow"><label class="rclear"><input type="checkbox" id="routeclear" checked> заменить текущий маршрут</label>' +
         '<button type="button" id="routego">Установить</button></div>';
     overlay.classList.add('visible');
+    applyRouteFilter();
+    updateRouteCnt();
+    fetch('/routes/tree').then(r => r.json())
+      .then(t => { routeTree = Array.isArray(t) ? t : []; renderRouteTree(); })
+      .catch(() => { document.getElementById('rtree').innerHTML = '<span class="err">дерево не загрузилось</span>'; });
     document.getElementById('routesys').focus();
   }
 
   document.getElementById('btn-waypoint').addEventListener('click', () => openRouteModal(selectedIDs()));
   document.getElementById('routechip').addEventListener('click', () => openRouteModal(selectedIDs()));
 
+  /* filter rows by modal chips: OR across tags, "__online" is liveness */
+  function applyRouteFilter() {
+    const act = [...modal.querySelectorAll('.rtags .tag.active')].map(t => t.dataset.tag);
+    const wantOnline = act.includes('__online');
+    const plain = act.filter(t => t !== '__online');
+    modal.querySelectorAll('.routelist label').forEach(row => {
+      if (!act.length) { row.style.display = ''; return; }
+      const tags = (row.dataset.tags || '').split('|').filter(Boolean);
+      const ok = tags.some(t => plain.includes(t)) || (wantOnline && row.dataset.online === '1');
+      row.style.display = ok ? '' : 'none';
+    });
+  }
+  function updateRouteCnt() {
+    const el = document.getElementById('rcnt');
+    if (el) el.textContent = 'выбрано: ' + modal.querySelectorAll('.routelist input:checked').length;
+  }
+  document.addEventListener('change', e => {
+    if (e.target.closest('.routelist')) updateRouteCnt();
+  });
+
+  /* ── quick-destination tree ─────────────────────────────── */
+  function saveRouteTree() {
+    fetch('/routes/tree', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(routeTree)
+    });
+  }
+  function renderRouteTree() {
+    const el = document.getElementById('rtree');
+    if (!el) return;
+    if (!routeTree.length) {
+      el.innerHTML = '<span class="muted">пусто — «+ папка», в папке «+» добавит систему</span>';
+      return;
+    }
+    el.innerHTML = routeTree.map((f, fi) =>
+      '<div class="rfold' + (f.open ? ' open' : '') + '" data-fi="' + fi + '">' +
+        '<div class="rfhead"><i class="caret"></i><span class="rfname">' + rEsc(f.name) + '</span>' +
+          '<span class="racts"><button type="button" class="rf-add" title="добавить систему">+</button>' +
+          '<button type="button" class="rf-del" title="удалить папку">×</button></span></div>' +
+        '<div class="rfbody">' + (f.systems || []).map((sys, si) =>
+          '<div class="rsys" data-fi="' + fi + '" data-si="' + si + '">' +
+            '<button type="button" class="rs-go" title="установить маршрут выбранным">➤</button>' +
+            '<span class="rsname" title="подставить в поле назначения">' + rEsc(sys) + '</span>' +
+            '<button type="button" class="rs-del" title="убрать из дерева">×</button></div>').join('') +
+        '</div></div>').join('');
+  }
+  // Inline name entry: Enter commits, blur or Escape cancels. Commit rides
+  // the form's own submit — keyboard hooks (layout switchers) resynthesize
+  // key events with an empty e.key, so sniffing for "Enter" misses them.
+  function rNewInput(parent, top, placeholder, commit) {
+    const div = document.createElement('div');
+    div.className = 'rnew' + (top ? ' top' : '');
+    div.innerHTML = '<form action=""><input type="text" placeholder="' + placeholder + '"></form>';
+    parent.insertBefore(div, top ? parent.firstChild : null);
+    const inp = div.querySelector('input');
+    inp.focus();
+    // Removing the focused input fires blur mid-remove; without unhooking
+    // it first the second remove() throws and the commit never happens.
+    const onBlur = () => finish('');
+    function finish(v) {
+      inp.removeEventListener('blur', onBlur);
+      div.remove();
+      if (v) commit(v);
+    }
+    div.querySelector('form').addEventListener('submit', e => {
+      e.preventDefault();
+      finish(inp.value.trim());
+    });
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Escape' || e.keyCode === 27) {
+        e.stopImmediatePropagation(); // keep the modal itself open
+        finish('');
+      }
+    });
+    inp.addEventListener('blur', onBlur);
+  }
   document.addEventListener('click', e => {
-    const pk = e.target.closest('.rquick [data-pick]');
-    if (pk) {
-      modal.querySelectorAll('.routelist input').forEach(cb => {
-        cb.checked = pk.dataset.pick === 'all' ? true :
-                     pk.dataset.pick === 'none' ? false :
-                     cb.dataset.online === '1';
+    if (e.target.id === 'raddfold') {
+      rNewInput(document.getElementById('rtree'), true, 'название папки', v => {
+        routeTree.push({name: v, open: true, systems: []});
+        saveRouteTree(); renderRouteTree();
       });
       return;
     }
-    if (e.target.id !== 'routego') return;
-    const btn = e.target;
+    const fold = e.target.closest('.rfold');
+    if (!fold) return;
+    const fi = Number(fold.dataset.fi);
+    if (e.target.closest('.rf-add')) {
+      routeTree[fi].open = true;
+      fold.classList.add('open');
+      rNewInput(fold.querySelector('.rfbody'), true, 'система или станция', v => {
+        // a comma-separated paste adds several at once
+        v.split(',').map(x => x.trim()).filter(Boolean)
+          .forEach(x => routeTree[fi].systems.push(x));
+        saveRouteTree(); renderRouteTree();
+      });
+      return;
+    }
+    if (e.target.closest('.rf-del')) {
+      if ((routeTree[fi].systems || []).length &&
+          !confirm('Удалить папку «' + routeTree[fi].name + '» вместе с системами?')) return;
+      routeTree.splice(fi, 1);
+      saveRouteTree(); renderRouteTree();
+      return;
+    }
+    const sysRow = e.target.closest('.rsys');
+    if (sysRow) {
+      const si = Number(sysRow.dataset.si);
+      if (e.target.closest('.rs-del')) {
+        routeTree[fi].systems.splice(si, 1);
+        saveRouteTree(); renderRouteTree();
+      } else if (e.target.closest('.rs-go')) {
+        sendRoute(routeTree[fi].systems[si], true, e.target.closest('.rs-go'));
+      } else if (e.target.closest('.rsname')) {
+        document.getElementById('routesys').value = routeTree[fi].systems[si];
+      }
+      return;
+    }
+    if (e.target.closest('.rfhead')) {
+      routeTree[fi].open = !routeTree[fi].open;
+      fold.classList.toggle('open', routeTree[fi].open);
+      saveRouteTree();
+    }
+  });
+
+  /* ── sending: shared by the Установить button and tree ➤ ── */
+  function markRouteResults(results) {
+    const errOf = {};
+    results.forEach(r => { errOf[r.id] = r.error || ''; });
+    let fails = 0;
+    modal.querySelectorAll('.routelist input').forEach(cb => {
+      const st = cb.closest('label').querySelector('.st');
+      if (!(cb.dataset.id in errOf)) { st.textContent = ''; st.className = 'st'; return; }
+      const err = errOf[cb.dataset.id];
+      if (err) fails++;
+      st.textContent = err ? '✕ ' + err : '✓';
+      st.className = 'st ' + (err ? 'err' : 'ok');
+    });
+    return fails;
+  }
+  function sendRoute(system, clear, treeBtn) {
     const ids = [...modal.querySelectorAll('.routelist input:checked')].map(cb => Number(cb.dataset.id));
-    const system = (document.getElementById('routesys').value || '').trim();
     if (!ids.length) { alert('Никто не выбран.'); return; }
-    if (!system) { document.getElementById('routesys').focus(); return; }
-    btn.disabled = true;
-    btn.textContent = 'Устанавливаю…';
+    const go = document.getElementById('routego');
+    go.disabled = true;
+    if (treeBtn) treeBtn.textContent = '…'; else go.textContent = 'Устанавливаю…';
     fetch('/bulk/waypoint', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ids, system, clear: document.getElementById('routeclear').checked})
+      body: JSON.stringify({ids, system, clear})
     })
       .then(r => r.json())
       .then(data => {
-        btn.disabled = false;
-        if (data.error) { btn.textContent = 'Установить'; alert('Ошибка: ' + data.error); return; }
-        const errOf = {};
-        data.results.forEach(r => { errOf[r.id] = r.error || ''; });
-        let fails = 0;
-        modal.querySelectorAll('.routelist input').forEach(cb => {
-          const st = cb.closest('label').querySelector('.st');
-          if (!(cb.dataset.id in errOf)) { st.textContent = ''; st.className = 'st'; return; }
-          const err = errOf[cb.dataset.id];
-          if (err) fails++;
-          st.textContent = err ? '✕ ' + err : '✓';
-          st.className = 'st ' + (err ? 'err' : 'ok');
-        });
-        btn.textContent = fails ? 'Повторить' : 'Готово ✓';
+        go.disabled = false;
+        if (data.error) {
+          if (treeBtn) treeBtn.textContent = '➤';
+          go.textContent = 'Установить';
+          alert('Ошибка: ' + data.error);
+          return;
+        }
+        // Show what actually resolved: the pasted junk («Leurtmar* », a
+        // localized station name) becomes the canonical destination.
+        document.getElementById('routesys').value = data.system;
+        const fails = markRouteResults(data.results);
+        if (treeBtn) {
+          treeBtn.textContent = fails ? '✕' : '✓';
+          setTimeout(() => { treeBtn.textContent = '➤'; }, 2000);
+          go.textContent = 'Установить';
+        } else {
+          go.textContent = fails ? 'Повторить' : 'Готово ✓';
+        }
       })
-      .catch(err => { btn.disabled = false; btn.textContent = 'Установить'; alert('Ошибка: ' + err.message); });
+      .catch(err => {
+        go.disabled = false;
+        if (treeBtn) treeBtn.textContent = '➤';
+        go.textContent = 'Установить';
+        alert('Ошибка: ' + err.message);
+      });
+  }
+  document.addEventListener('click', e => {
+    const pk = e.target.closest('.rquick [data-pick]');
+    if (pk) {
+      // quick-pick works on what the filter shows, not on hidden rows
+      modal.querySelectorAll('.routelist label').forEach(row => {
+        if (row.style.display === 'none') return;
+        row.querySelector('input').checked =
+          pk.dataset.pick === 'all' ? true :
+          pk.dataset.pick === 'none' ? false :
+          row.dataset.online === '1';
+      });
+      updateRouteCnt();
+      return;
+    }
+    const chip = e.target.closest('.rtags .tag');
+    if (chip) { chip.classList.toggle('active'); applyRouteFilter(); return; }
+    if (e.target.id !== 'routego') return;
+    const system = (document.getElementById('routesys').value || '').trim();
+    if (!system) { document.getElementById('routesys').focus(); return; }
+    sendRoute(system, document.getElementById('routeclear').checked, null);
+  });
+  document.addEventListener('submit', e => {
+    if (e.target.id === 'rsysform') { e.preventDefault(); document.getElementById('routego').click(); }
   });
 
   /* ── drag & drop ordering ───────────────────────────────── */
