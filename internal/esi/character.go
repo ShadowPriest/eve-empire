@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1268,6 +1269,156 @@ func (c *Client) CorporationWallets(characterID, corporationID int64) ([]CorpWal
 // ResolveSystem converts a solar system name to its id via /universe/ids/.
 func (c *Client) ResolveSystem(name string) (int64, error) {
 	return c.resolveName(name, "systems", "система")
+}
+
+var (
+	// "Pator V (Vakir)" → strip "(Vakir)", then the planet numeral "V".
+	parenTail = regexp.MustCompile(`\s*\([^)]*\)$`)
+	romanTail = regexp.MustCompile(`\s+[IVXLCDM]+$`)
+	digitsRe  = regexp.MustCompile(`\d+`)
+)
+
+// CleanPastedName strips what the game client appends when a location name
+// is copied out of it: a trailing asterisk and stray spaces ("Leurtmar* ").
+func CleanPastedName(s string) string {
+	return strings.TrimSpace(strings.TrimRight(strings.TrimSpace(s), "* \t\u00a0"))
+}
+
+// ResolveDestination turns a pasted destination — a solar system or an NPC
+// station, copied from a client in any language — into an id SetWaypoint
+// accepts, plus the canonical name of what was actually resolved.
+//
+// /universe/ids/ only knows English names, so a station pasted from a
+// localized client ("Pator V (Vakir) - Центр снабжения Republic Fleet")
+// resolves in two hops: the "Pator V (Vakir)" prefix and the moon number
+// are the same in every locale, which pins the system and narrows its
+// station list; corp names in the localized tail keep their Latin words
+// ("Republic Fleet"), which breaks ties between stations sharing a planet.
+func (c *Client) ResolveDestination(raw string) (int64, string, error) {
+	name := CleanPastedName(raw)
+	if name == "" {
+		return 0, "", fmt.Errorf("пустое название")
+	}
+	if id, _ := c.lookupExact(name); id != 0 {
+		return id, name, nil // exact hit, English or plain system name
+	}
+	seg := strings.Split(name, " - ")
+	if len(seg) < 2 {
+		return 0, "", fmt.Errorf("система %q не найдена", name)
+	}
+	place := strings.TrimSpace(seg[0])
+	sysName := strings.TrimSpace(romanTail.ReplaceAllString(parenTail.ReplaceAllString(place, ""), ""))
+	sysID, err := c.ResolveSystem(sysName)
+	if err != nil {
+		return 0, "", fmt.Errorf("станция %q не найдена (и система %q тоже)", name, sysName)
+	}
+
+	var sys struct {
+		Stations []int64 `json:"stations"`
+	}
+	if err := c.publicGet("/universe/systems/"+strconv.FormatInt(sysID, 10)+"/", &sys); err != nil {
+		return 0, "", err
+	}
+	wantMoon := middleNumber(seg)
+	best, bestScore := "", -1
+	var bestID int64
+	for _, sid := range sys.Stations {
+		var st struct {
+			Name string `json:"name"`
+		}
+		if err := c.publicGet("/universe/stations/"+strconv.FormatInt(sid, 10)+"/", &st); err != nil {
+			continue
+		}
+		eseg := strings.Split(st.Name, " - ")
+		if !strings.EqualFold(strings.TrimSpace(eseg[0]), place) || middleNumber(eseg) != wantMoon {
+			continue
+		}
+		score := tokenOverlap(seg[len(seg)-1], eseg[len(eseg)-1])
+		if score > bestScore {
+			best, bestScore, bestID = st.Name, score, sid
+		}
+	}
+	if bestID != 0 {
+		return bestID, best, nil
+	}
+	// The place parsed but no station matched: route to the system at least.
+	return sysID, sysName + " (станция не опознана, маршрут до системы)", nil
+}
+
+// lookupExact asks /universe/ids/ for the name and takes a system or an
+// NPC station, whichever matches. English names only — that's all it knows.
+func (c *Client) lookupExact(name string) (int64, string) {
+	payload, _ := json.Marshal([]string{name})
+	req, err := http.NewRequest("POST", baseURL+"/universe/ids/", bytes.NewReader(payload))
+	if err != nil {
+		return 0, ""
+	}
+	req.Header.Set("User-Agent", c.st.userAgent)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.st.http.Do(req)
+	if err != nil {
+		return 0, ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, ""
+	}
+	var out map[string][]struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, ""
+	}
+	for _, bucket := range []string{"systems", "stations"} {
+		if len(out[bucket]) > 0 {
+			return out[bucket][0].ID, bucket
+		}
+	}
+	return 0, ""
+}
+
+// middleNumber pulls the moon number out of "Sys IV - Moon 3 - Station":
+// the numeral in the middle segments is locale-independent («Луна 3»).
+func middleNumber(seg []string) string {
+	for _, s := range seg[1 : len(seg)-1] {
+		if m := digitsRe.FindString(s); m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
+// tokenOverlap counts words two station-name tails share, case-insensitively.
+func tokenOverlap(a, b string) int {
+	set := map[string]bool{}
+	for _, w := range strings.Fields(strings.ToLower(a)) {
+		set[w] = true
+	}
+	n := 0
+	for _, w := range strings.Fields(strings.ToLower(b)) {
+		if set[w] {
+			n++
+		}
+	}
+	return n
+}
+
+// publicGet fetches an unauthenticated ESI endpoint.
+func (c *Client) publicGet(path string, out any) error {
+	req, err := http.NewRequest("GET", baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", c.st.userAgent)
+	resp, err := c.st.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET %s: %s", path, resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 // ResolveCharacter converts a character name to its id (exact match).
