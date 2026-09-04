@@ -134,6 +134,13 @@
     border-bottom: 1px solid #1b2436;
   }
   .tagcloud:empty { display: none; }
+  /* action chip in the tag row: opens the route modal, not a filter */
+  .tagcloud .routechip {
+    font-size: .7rem; padding: .12rem .5rem; border-radius: 10px;
+    background: #121826; border: 1px dashed #2a3a55; color: #4da3ff;
+    cursor: pointer; margin-left: auto;
+  }
+  .tagcloud .routechip:hover { border-color: #4da3ff; }
   .tag {
     font-size: .7rem; padding: .12rem .5rem; border-radius: 10px;
     background: #121826; border: 1px solid #2a3a55; color: #7b8aa0;
@@ -1425,6 +1432,21 @@
   .modal .picklist { display: flex; flex-wrap: wrap; gap: .35rem; margin: .6rem 0; }
   .modal .mrow { display: flex; gap: .6rem; margin-top: .8rem; align-items: center; }
   .modal .mrow input { flex: 1; }
+
+  /* route modal: char picker with checkboxes */
+  .modal .rquick { display: flex; gap: .4rem; align-items: center; margin: .5rem 0 0; font-size: .8rem; color: #7b8aa0; }
+  .modal .rquick button { font-size: .72rem; padding: .15rem .55rem; }
+  .modal .routelist { max-height: 45vh; overflow-y: auto; margin: .6rem 0 0; }
+  .modal .routelist label { display: flex; align-items: center; gap: .5rem; font-size: .85rem;
+    padding: .2rem .3rem; border-radius: 4px; cursor: pointer; color: #7b8aa0; }
+  .modal .routelist label:hover { background: #1a2438; }
+  .modal .routelist label.on { color: #e8eef7; }
+  .modal .routelist img { width: 24px; height: 24px; border-radius: 3px; }
+  .modal .routelist .st { margin-left: auto; font-size: .75rem; white-space: nowrap; }
+  .modal .routelist .st.ok { color: #5fd38d; }
+  .modal .routelist .st.err { color: #ff6b6b; }
+  .modal .rclear { font-size: .8rem; color: #c9d4e3; display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
+  .modal .rclear input { flex: none; }
   /* compact training row in the sidebar char cards */
   .char .tr.trq { display: flex; align-items: center; gap: .3rem; }
   .char .trq .sq { gap: 1px; }
@@ -1613,6 +1635,7 @@
     <div class="tagcloud" id="tagcloud">
       <span class="tag dyn" data-tag="__online" title="показать только персонажей в игре">онлайн</span>
       {{range .AllTags}}<span class="tag" data-tag="{{.}}">{{.}}</span>{{end}}
+      <span class="routechip" id="routechip" title="установить маршрут нескольким персонажам">маршрут…</span>
     </div>
     <div class="charlist" id="charlist">
       {{range .Groups}}
@@ -3240,23 +3263,79 @@
     // plain click falls through: navigates and selects the character
   });
 
-  document.getElementById('btn-waypoint').addEventListener('click', async () => {
-    const ids = selectedIDs();
-    if (!ids.length) return;
-    const system = prompt('Система назначения (например: Jita):');
-    if (!system) return;
-    const clear = confirm('Очистить текущий маршрут? (ОК — да, Отмена — добавить точкой)');
-    const resp = await fetch('/bulk/waypoint', {
+  /* ── route modal: pick chars with checkboxes, set waypoint ──
+     Waypoints land only in running clients, so online chars are
+     pre-checked; a Ctrl+click selection (bulkbar) overrides that. */
+  function openRouteModal(preIDs) {
+    const pre = preIDs && preIDs.length ? new Set(preIDs) : null;
+    const rows = [...list.querySelectorAll('.char')].map(ch => {
+      const id = Number(ch.dataset.id);
+      const online = ch.dataset.online === '1';
+      return '<label class="' + (online ? 'on' : '') + '">' +
+        '<input type="checkbox" data-id="' + id + '" data-online="' + (online ? 1 : '') + '"' +
+        ((pre ? pre.has(id) : online) ? ' checked' : '') + '>' +
+        '<img src="https://images.evetech.net/characters/' + id + '/portrait?size=32" alt="">' +
+        ch.querySelector('.nm').textContent +
+        (online ? '<i class="dot green" title="в игре"></i>' : '') +
+        '<span class="st"></span></label>';
+    });
+    modal.innerHTML = '<h3>Установить маршрут</h3>' +
+      '<div class="rquick">выбрать: ' +
+        '<button type="button" data-pick="online">онлайн</button>' +
+        '<button type="button" data-pick="all">всех</button>' +
+        '<button type="button" data-pick="none">никого</button></div>' +
+      '<div class="routelist">' + rows.join('') + '</div>' +
+      '<div class="mrow"><input type="text" id="routesys" placeholder="система назначения, например Jita"></div>' +
+      '<div class="mrow"><label class="rclear"><input type="checkbox" id="routeclear" checked> заменить текущий маршрут</label>' +
+        '<button type="button" id="routego">Установить</button></div>';
+    overlay.classList.add('visible');
+    document.getElementById('routesys').focus();
+  }
+
+  document.getElementById('btn-waypoint').addEventListener('click', () => openRouteModal(selectedIDs()));
+  document.getElementById('routechip').addEventListener('click', () => openRouteModal(selectedIDs()));
+
+  document.addEventListener('click', e => {
+    const pk = e.target.closest('.rquick [data-pick]');
+    if (pk) {
+      modal.querySelectorAll('.routelist input').forEach(cb => {
+        cb.checked = pk.dataset.pick === 'all' ? true :
+                     pk.dataset.pick === 'none' ? false :
+                     cb.dataset.online === '1';
+      });
+      return;
+    }
+    if (e.target.id !== 'routego') return;
+    const btn = e.target;
+    const ids = [...modal.querySelectorAll('.routelist input:checked')].map(cb => Number(cb.dataset.id));
+    const system = (document.getElementById('routesys').value || '').trim();
+    if (!ids.length) { alert('Никто не выбран.'); return; }
+    if (!system) { document.getElementById('routesys').focus(); return; }
+    btn.disabled = true;
+    btn.textContent = 'Устанавливаю…';
+    fetch('/bulk/waypoint', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ids, system, clear})
-    });
-    const data = await resp.json();
-    if (data.error) { alert('Ошибка: ' + data.error); return; }
-    const fails = data.results.filter(r => r.error);
-    alert(fails.length
-      ? 'Готово с ошибками:\n' + fails.map(r => r.id + ': ' + r.error).join('\n')
-      : 'Маршрут на ' + data.system + ' установлен всем (' + data.results.length + ').');
+      body: JSON.stringify({ids, system, clear: document.getElementById('routeclear').checked})
+    })
+      .then(r => r.json())
+      .then(data => {
+        btn.disabled = false;
+        if (data.error) { btn.textContent = 'Установить'; alert('Ошибка: ' + data.error); return; }
+        const errOf = {};
+        data.results.forEach(r => { errOf[r.id] = r.error || ''; });
+        let fails = 0;
+        modal.querySelectorAll('.routelist input').forEach(cb => {
+          const st = cb.closest('label').querySelector('.st');
+          if (!(cb.dataset.id in errOf)) { st.textContent = ''; st.className = 'st'; return; }
+          const err = errOf[cb.dataset.id];
+          if (err) fails++;
+          st.textContent = err ? '✕ ' + err : '✓';
+          st.className = 'st ' + (err ? 'err' : 'ok');
+        });
+        btn.textContent = fails ? 'Повторить' : 'Готово ✓';
+      })
+      .catch(err => { btn.disabled = false; btn.textContent = 'Установить'; alert('Ошибка: ' + err.message); });
   });
 
   /* ── drag & drop ordering ───────────────────────────────── */
