@@ -174,7 +174,13 @@ CREATE TABLE IF NOT EXISTS account_omega (
 	if err != nil {
 		return err
 	}
-	return s.migrateHistory()
+	if err := s.migrateHistory(); err != nil {
+		return err
+	}
+	if err := s.migrateSPFarm(); err != nil {
+		return err
+	}
+	return s.migrateAir()
 }
 
 // ── mining ledger ────────────────────────────────────────────────────

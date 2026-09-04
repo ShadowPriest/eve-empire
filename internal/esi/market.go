@@ -23,6 +23,13 @@ import (
 // The Forge for them returns an empty book.
 const RegionPLEX = 19000001
 
+// Товары SP-фермы (type id проверены по sde.db).
+const (
+	TypePLEX           = 44992
+	TypeSkillExtractor = 40519
+	TypeLargeInjector  = 40520
+)
+
 // Price statistics the table can be rendered with.
 const (
 	StatSellMin = "smin"

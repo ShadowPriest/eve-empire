@@ -1,0 +1,88 @@
+{{define "content"}}
+<div class="zoom75">
+<h1>Хранилище PLEX</h1>
+<nav class="tabs">
+  <a href="/tools/spfarm">SP-ферма</a>
+  <a href="/tools/spfarm/model">Модель фермы</a>
+  <a class="active">Хранилище PLEX</a>
+</nav>
+
+{{if .Err}}<p class="err">{{.Err}}</p>{{end}}
+
+<div class="card phead">
+  <p class="klabel" style="margin:0;">Журнал закупа PLEX: когда и почём куплено, во сколько реально обходится подписка</p>
+</div>
+
+{{with .Buy}}
+<div class="card" style="margin-top:1rem;">
+  <div class="frow" style="gap:2.2rem; flex-wrap:wrap;">
+    <div>
+      <p class="klabel" style="margin:0;">Куплено</p>
+      <p class="kval" style="margin-top:.3rem;">{{num .Qty}} <span class="muted" style="font-size:.75rem;">PLEX</span></p>
+    </div>
+    <div>
+      <p class="klabel" style="margin:0;">Потрачено</p>
+      <p class="kval" style="margin-top:.3rem;">{{iskshort .ISK}}</p>
+    </div>
+    <div>
+      <p class="klabel" style="margin:0;">Средняя цена</p>
+      <p class="kval" style="margin-top:.3rem;">{{unitprice .Avg}}
+        <span class="muted" style="font-size:.75rem;">сейчас {{unitprice .CurPrice}}</span></p>
+    </div>
+    {{if .Diff}}
+    <div>
+      <p class="klabel" style="margin:0;">Против текущей цены</p>
+      <p class="kval {{if gt .Diff 0.0}}pos{{else}}neg{{end}}" style="margin-top:.3rem;" title="во сколько дешевле (или дороже) обошёлся весь закуп, чем если бы покупал сегодня">{{iskshort .Diff}}</p>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+<div class="card" style="margin-top:1rem;">
+  <p class="klabel" style="margin-top:0;">Записать покупку</p>
+  <form method="post" action="/tools/plex/buy" class="frow" style="gap:1rem; flex-wrap:wrap; align-items:flex-end;">
+    <label class="ofield" style="width:9rem;">
+      <span class="klabel">Дата</span>
+      <input type="text" name="day" value="{{.Today}}" placeholder="ГГГГ-ММ-ДД">
+    </label>
+    <label class="ofield" style="width:8rem;" title="отрицательное — расход PLEX (активация подписки, бустер)">
+      <span class="klabel">PLEX</span>
+      <input type="text" name="qty" value="" placeholder="500">
+    </label>
+    <label class="ofield" style="width:10rem;">
+      <span class="klabel">Цена за штуку, ISK</span>
+      <input type="text" name="price" value="" placeholder="4 619 000">
+    </label>
+    <label class="ofield" style="flex:1; min-width:12rem;">
+      <span class="klabel">Заметка</span>
+      <input type="text" name="note" value="" placeholder="закуп на просадке">
+    </label>
+    <button class="tog on" type="submit">Записать</button>
+  </form>
+
+  {{if .Purchases}}
+  <table style="margin-top:.8rem;">
+    <tr><th>Дата</th><th class="r">PLEX</th><th class="r">Цена</th><th class="r">Сумма</th><th>Заметка</th><th></th></tr>
+    {{range .Purchases}}
+    <tr>
+      <td>{{.Day}}</td>
+      <td class="r {{if lt .Qty 0}}neg{{end}}">{{num .Qty}}</td>
+      <td class="r">{{unitprice .Price}}</td>
+      <td class="r">{{iskshort (mulf (float .Qty) .Price)}}</td>
+      <td class="muted">{{.Note}}</td>
+      <td class="r">
+        <form method="post" action="/tools/plex/buy/delete" onsubmit="return confirm('Удалить запись?');" style="display:inline;">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button class="tog" type="submit" title="удалить">✕</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="knote muted" style="margin-top:.6rem;">Покупок пока не записано.</p>
+  {{end}}
+</div>
+</div>
+{{end}}
