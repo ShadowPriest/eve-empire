@@ -28,7 +28,11 @@ type Character struct {
 }
 
 func Open(path string, encryptionKey []byte) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	// synchronous(NORMAL) is the recommended pairing with WAL: an fsync
+	// per checkpoint instead of per commit. On the router's flash storage
+	// the per-commit fsync made every ESI cache write block the sole
+	// connection — and with it every page read — for tens of milliseconds.
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)")
 	if err != nil {
 		return nil, err
 	}

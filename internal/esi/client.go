@@ -31,6 +31,14 @@ const (
 	compatDate = "2026-01-01"
 )
 
+// maxParallelFetches bounds concurrent ESI network requests. A fresh
+// sidebar sweep fires ~7 requests per alt; with dozens of alts the
+// unbounded burst used to saturate the router's CPU (TLS + JSON) and
+// its single SQLite connection with cache writes, freezing every other
+// page until the sweep finished. The page is already rendered from the
+// stale cache at that point, so the sweep may take its time.
+const maxParallelFetches = 6
+
 // state is shared between the primary client and its stale views.
 type state struct {
 	http      *http.Client
@@ -38,10 +46,23 @@ type state struct {
 	sso       *sso.Client
 	store     *store.Store
 	language  atomic.Value // string; "" or "en" = ESI default
+	sem       chan struct{} // bounds concurrent network fetches
 
-	mu    sync.Mutex
-	cache map[string]cacheEntry // URL -> cached response body (memory tier)
-	names map[int64]string      // entity id -> name (memory tier)
+	mu       sync.Mutex
+	cache    map[string]cacheEntry // URL -> cached response body (memory tier)
+	names    map[int64]string      // entity id -> name (memory tier)
+	inflight map[string]*inflightCall // URL -> network fetch in progress
+}
+
+// inflightCall coalesces concurrent fetches of one URL: the sidebar and
+// the page ask for the same data, and a navigation mid-revalidation
+// starts a second sweep over the same URLs. Only the first caller goes
+// to the network; the rest wait for its result.
+type inflightCall struct {
+	done  chan struct{}
+	body  []byte
+	pages int
+	err   error
 }
 
 type cacheEntry struct {
@@ -61,13 +82,25 @@ type Client struct {
 }
 
 func New(ssoClient *sso.Client, st *store.Store, userAgent string) *Client {
+	// The default transport keeps only 2 idle connections per host, so a
+	// burst of requests to esi.evetech.net over HTTP/1.1 would open (and
+	// TLS-handshake) a fresh connection almost every time.
+	transport := &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        maxParallelFetches + 4,
+		MaxIdleConnsPerHost: maxParallelFetches,
+		IdleConnTimeout:     90 * time.Second,
+	}
 	return &Client{st: &state{
-		http:      &http.Client{Timeout: 30 * time.Second},
+		http:      &http.Client{Timeout: 30 * time.Second, Transport: transport},
 		userAgent: userAgent,
 		sso:       ssoClient,
 		store:     st,
+		sem:       make(chan struct{}, maxParallelFetches),
 		cache:     map[string]cacheEntry{},
 		names:     map[int64]string{},
+		inflight:  map[string]*inflightCall{},
 	}}
 }
 
@@ -177,10 +210,42 @@ func (c *Client) getURL(characterID int64, url string, compat bool, out any) (in
 		return 0, fmt.Errorf("нет кэша (данные загружаются)")
 	}
 
-	// Network.
+	// Network — the first caller fetches, concurrent callers of the
+	// same URL wait for its result instead of duplicating the request.
+	c.st.mu.Lock()
+	if call, ok := c.st.inflight[url]; ok {
+		c.st.mu.Unlock()
+		<-call.done
+		if call.err != nil {
+			return 0, call.err
+		}
+		return call.pages, json.Unmarshal(call.body, out)
+	}
+	call := &inflightCall{done: make(chan struct{})}
+	c.st.inflight[url] = call
+	c.st.mu.Unlock()
+
+	call.body, call.pages, call.err = c.fetch(characterID, url, compat)
+
+	c.st.mu.Lock()
+	delete(c.st.inflight, url)
+	c.st.mu.Unlock()
+	close(call.done)
+
+	if call.err != nil {
+		return 0, call.err
+	}
+	return call.pages, json.Unmarshal(call.body, out)
+}
+
+// fetch performs the actual network request and stores the response in
+// both cache tiers. The semaphore is taken around the request itself:
+// token refresh happens before (it is the SSO host, not ESI), and the
+// caller-side coalescing above already keeps duplicates out.
+func (c *Client) fetch(characterID int64, url string, compat bool) ([]byte, int, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
 	req.Header.Set("User-Agent", c.st.userAgent)
 	req.Header.Set("Accept", "application/json")
@@ -190,23 +255,25 @@ func (c *Client) getURL(characterID int64, url string, compat bool, out any) (in
 	if characterID != 0 {
 		tok, err := c.accessToken(characterID)
 		if err != nil {
-			return 0, err
+			return nil, 0, err
 		}
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 
+	c.st.sem <- struct{}{}
 	resp, err := c.st.http.Do(req)
 	if err != nil {
-		return 0, err
+		<-c.st.sem
+		return nil, 0, err
 	}
-	defer resp.Body.Close()
-
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	resp.Body.Close()
+	<-c.st.sem
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("esi %s: %s: %s", url, resp.Status, truncate(body, 200))
+		return nil, 0, fmt.Errorf("esi %s: %s: %s", url, resp.Status, truncate(body, 200))
 	}
 
 	pages := 1
@@ -221,7 +288,7 @@ func (c *Client) getURL(characterID int64, url string, compat bool, out any) (in
 	c.st.mu.Unlock()
 	c.st.store.CachePut(url, body, pages, expires)
 
-	return pages, json.Unmarshal(body, out)
+	return body, pages, nil
 }
 
 // post performs an authenticated POST (no caching, e.g. UI actions).
@@ -368,8 +435,10 @@ func (c *Client) Names(ids []int64) map[int64]string {
 		req.Header.Set("User-Agent", c.st.userAgent)
 		req.Header.Set("Content-Type", "application/json")
 
+		c.st.sem <- struct{}{}
 		resp, err := c.st.http.Do(req)
 		if err != nil {
+			<-c.st.sem
 			break
 		}
 		var batch []struct {
@@ -379,6 +448,7 @@ func (c *Client) Names(ids []int64) map[int64]string {
 		ok := resp.StatusCode == http.StatusOK &&
 			json.NewDecoder(resp.Body).Decode(&batch) == nil
 		resp.Body.Close()
+		<-c.st.sem
 		if !ok {
 			break
 		}
