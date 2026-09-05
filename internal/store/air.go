@@ -385,6 +385,40 @@ func (s *Store) AirSyncWalletDays(now time.Time) (map[int64]int, error) {
 	return wallet, nil
 }
 
+// ── диагностика сырья ────────────────────────────────────────────────
+
+// AirWalletDiag — видно ли синку сырьё. Пустой бейдж «валет» выглядит
+// одинаково и когда цели не выполнялись, и когда сбор журналов мёртв
+// (выключен коллектор, мёртвые токены) — страница должна их различать:
+// на проде это стоило дня недоумения.
+type AirWalletDiag struct {
+	InWindow   int             // записей daily_goal_payouts в окне месяца
+	LastPayout time.Time       // самая свежая такая запись вообще (UTC)
+	Wallet     CollectorStatus // последний прогон сбора валетов
+}
+
+func (s *Store) AirWalletDiag(now time.Time) AirWalletDiag {
+	var d AirWalletDiag
+	from, to := s.airWalletWindow(now)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM hist_journal
+		WHERE ref_type = 'daily_goal_payouts' AND date >= ? AND date < ?`,
+		from.Unix(), to.Unix()).Scan(&d.InWindow)
+	var last int64
+	_ = s.db.QueryRow(`SELECT COALESCE(MAX(date), 0) FROM hist_journal
+		WHERE ref_type = 'daily_goal_payouts'`).Scan(&last)
+	if last > 0 {
+		d.LastPayout = time.Unix(last, 0).UTC()
+	}
+	if sts, err := s.CollectorStatuses(); err == nil {
+		for _, st := range sts {
+			if st.Task == "wallet" {
+				d.Wallet = st
+			}
+		}
+	}
+	return d
+}
+
 // ── таймер автообновления ────────────────────────────────────────────
 
 // Шкала AIR обновляется в даунтайм, а он статичен — 11:00 UTC каждый

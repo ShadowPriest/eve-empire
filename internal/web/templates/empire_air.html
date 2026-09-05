@@ -71,6 +71,15 @@
       <button class="airbtn warn" type="submit">Начать новый месяц</button>
     </form>
   </div>
+  {{with .Diag}}
+  <p class="knote {{if eq .InWindow 0}}sev-warn{{else}}muted{{end}}" style="margin:.5rem 0 0;">
+    Сбор валетов:
+    {{if .Wallet.LastTry.IsZero}}<span class="sev-err">ещё ни разу не запускался — коллектор выключен?</span>
+    {{else if .Wallet.LastOK.IsZero}}<span class="sev-err" title="{{.Wallet.Note}}">ни одного успешного прогона</span>
+    {{else}}<span title="{{.Wallet.Note}}">OK {{.Wallet.LastOK.Format "02.01 15:04"}}</span>{{end}}
+    · записей daily goals в окне месяца: {{.InWindow}}{{if not .LastPayout.IsZero}} · свежайшая: {{.LastPayout.Format "02.01 15:04"}} EVE{{end}}{{if eq .InWindow 0}} — сырья нет: сбор не работает, токены мертвы (нужен /reauth) или награды ещё не забирались{{end}}
+  </p>
+  {{end}}
 </div>
 
 {{range .Chars}}

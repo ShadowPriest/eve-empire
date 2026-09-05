@@ -185,6 +185,7 @@ func (s *Server) handleAIR(w http.ResponseWriter, r *http.Request) {
 	resetAt, resetStored := s.Store.AirResetEffective(now)
 	data["ResetAt"] = resetAt.UTC() // подпись на странице — EVE-время
 	data["ResetCalc"] = !resetStored
+	data["Diag"] = s.Store.AirWalletDiag(now)
 	s.render(w, "empire_air", data, stale)
 }
 
