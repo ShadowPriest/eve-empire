@@ -182,7 +182,9 @@ func (s *Server) handleAIR(w http.ResponseWriter, r *http.Request) {
 	data["DayTiles"] = airDayTiles()
 	data["LiveTotal"] = liveTotal
 	data["Finals"] = finals
-	data["ResetAt"] = s.Store.AirResetAt().UTC() // подпись на странице — EVE-время
+	resetAt, resetStored := s.Store.AirResetEffective(now)
+	data["ResetAt"] = resetAt.UTC() // подпись на странице — EVE-время
+	data["ResetCalc"] = !resetStored
 	s.render(w, "empire_air", data, stale)
 }
 

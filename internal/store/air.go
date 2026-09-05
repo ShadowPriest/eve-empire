@@ -292,19 +292,33 @@ func airMonthStart(reset time.Time) time.Time {
 	return first.Add(-24 * time.Hour)
 }
 
-// airWalletWindow — окно текущего месяца AIR: от его начала до известного
-// момента обновления шкалы. Без таймера — от последнего закрытия. Совсем
-// без ориентиров окна нет — валет не применяем, только руки.
-func (s *Store) airWalletWindow(now time.Time) (from, to time.Time, ok bool) {
+// airNextCalendarReset — ближайшее обновление шкалы по календарю EVE:
+// ДТ 1-го числа. Раз шкала живёт по календарному месяцу, момент
+// обновления известен и без ручной синхронизации — свежая копия (прод)
+// работает сразу, без обязательной настройки таймера.
+func airNextCalendarReset(now time.Time) time.Time {
+	now = now.UTC()
+	cur := time.Date(now.Year(), now.Month(), 1, 11, 0, 0, 0, time.UTC)
+	if cur.After(now) {
+		return cur
+	}
+	return time.Date(now.Year(), now.Month()+1, 1, 11, 0, 0, 0, time.UTC)
+}
+
+// AirResetEffective — действующий момент обновления шкалы: заданный
+// синхронизацией или, когда таймер не задан, вычисленный по календарю.
+func (s *Store) AirResetEffective(now time.Time) (at time.Time, stored bool) {
 	if at := s.AirResetAt(); !at.IsZero() {
-		return airMonthStart(at), at, true
+		return at, true
 	}
-	var closed int64
-	_ = s.db.QueryRow(`SELECT COALESCE(MAX(closed_at), 0) FROM air_month`).Scan(&closed)
-	if closed > 0 {
-		return time.Unix(closed, 0), now, true
-	}
-	return time.Time{}, time.Time{}, false
+	return airNextCalendarReset(now), false
+}
+
+// airWalletWindow — окно текущего месяца AIR: от его начала до
+// действующего момента обновления шкалы.
+func (s *Store) airWalletWindow(now time.Time) (from, to time.Time) {
+	at, _ := s.AirResetEffective(now)
+	return airMonthStart(at), at
 }
 
 // AirSyncWalletDays подтягивает счётчики дней из собранных журналов
@@ -317,10 +331,7 @@ func (s *Store) airWalletWindow(now time.Time) (from, to time.Time, ok bool) {
 // значит «не выполнял»: журнал собирается с конца июля и не у всех
 // альтов, поэтому нулевые дни без записей не обнуляют ничего.
 func (s *Store) AirSyncWalletDays(now time.Time) (map[int64]int, error) {
-	from, to, ok := s.airWalletWindow(now)
-	if !ok {
-		return nil, nil
-	}
+	from, to := s.airWalletWindow(now)
 	maxDays := int(now.Sub(from).Hours()/24) + 1
 	maxDays = clampAir(maxDays, 0, AirMonthDays)
 	wallet := map[int64]int{}
@@ -421,12 +432,13 @@ func (s *Store) airAdvanceReset(at, now time.Time) error {
 	return s.SetAirResetAt(at)
 }
 
-// AirAutoClose closes the month when the stored reset moment has passed
-// and schedules the next one. Both the collector task and the page open
-// call it — the page is the insurance for a copy with collection off.
+// AirAutoClose closes the month when the effective reset moment (stored
+// or calendar-derived) has passed and schedules the next one. Both the
+// collector task and the page open call it — the page is the insurance
+// for a copy with collection off.
 func (s *Store) AirAutoClose(now time.Time) (bool, error) {
-	at := s.AirResetAt()
-	if at.IsZero() || at.After(now) {
+	at, _ := s.AirResetEffective(now)
+	if at.After(now) {
 		return false, nil
 	}
 	if _, err := s.CloseAirMonth(now); err != nil {

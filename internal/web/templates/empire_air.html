@@ -55,13 +55,8 @@
     </div>
     <div class="pstat">
       <p class="klabel">Новый месяц начнётся</p>
-      {{if .ResetAt.IsZero}}
-      <p class="kval muted">—</p>
-      <p class="knote muted">таймер не настроен</p>
-      {{else}}
       <p class="kval"><b data-countdown="{{.ResetAt.Format "2006-01-02T15:04:05Z07:00"}}">…</b></p>
-      <p class="knote muted">{{.ResetAt.Format "02.01.2006 15:04"}} EVE · закроется автоматически</p>
-      {{end}}
+      <p class="knote muted">{{.ResetAt.Format "02.01.2006 15:04"}} EVE · закроется автоматически{{if .ResetCalc}} · по календарю (1-е число в ДТ){{end}}</p>
     </div>
   </div>
   <div class="airctl">

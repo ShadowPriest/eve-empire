@@ -23,6 +23,24 @@ func TestAirSnapToDowntime(t *testing.T) {
 	}
 }
 
+// TestAirNextCalendarReset: без ручной синхронизации момент обновления
+// шкалы известен по календарю — ДТ 1-го числа. Свежая копия должна
+// работать сразу, без обязательной настройки таймера.
+func TestAirNextCalendarReset(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"2026-09-04 04:00:00", "2026-10-01 11:00:00"}, // середина месяца
+		{"2026-10-01 05:00:00", "2026-10-01 11:00:00"}, // 1-е число, до ДТ
+		{"2026-10-01 12:00:00", "2026-11-01 11:00:00"}, // 1-е число, после ДТ
+		{"2026-12-15 12:00:00", "2027-01-01 11:00:00"}, // через новый год
+	}
+	for _, c := range cases {
+		in, _ := time.Parse("2006-01-02 15:04:05", c.in)
+		if got := airNextCalendarReset(in).Format("2006-01-02 15:04:05"); got != c.want {
+			t.Errorf("next(%s) = %s, ждали %s", c.in, got, c.want)
+		}
+	}
+}
+
 // TestAirSyncWalletDays закрывает сверенную с живой базой механику:
 // деление шкалы AIR — запись daily_goal_payouts с reason дневного пункта
 // (1004953); на каждый пункт две записи — личная и корп-дубль, их счёт
@@ -33,8 +51,8 @@ func TestAirSnapToDowntime(t *testing.T) {
 func TestAirSyncWalletDays(t *testing.T) {
 	s := testStore(t)
 	// Сентябрь 2026: шкала открылась 31.08 11:00, обновится 01.10 11:00.
+	// Таймер намеренно НЕ задан: окно должно выйти из календаря само.
 	now := time.Date(2026, 9, 4, 4, 0, 0, 0, time.UTC) // идёт 4-й день
-	reset := time.Date(2026, 10, 1, 11, 0, 0, 0, time.UTC)
 
 	for _, c := range []struct {
 		id   int64
@@ -45,10 +63,6 @@ func TestAirSyncWalletDays(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.SetAirResetAt(reset); err != nil {
-		t.Fatal(err)
-	}
-
 	jid := int64(0)
 	journal := func(owner, div, charID int64, at time.Time, amount float64, reason string) {
 		jid++
