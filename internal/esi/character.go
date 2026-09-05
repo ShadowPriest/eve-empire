@@ -109,6 +109,23 @@ func (c *Client) Summary(characterID int64) Summary {
 	return s
 }
 
+// Whereabouts reports whether the character is logged in and, if so, the
+// name of the solar system they are in. Offline (or token-less) pilots
+// come back as (false, "", nil) — the route modal just greys them out.
+func (c *Client) Whereabouts(characterID int64) (bool, string, error) {
+	online, err := c.Online(characterID)
+	if err != nil || !online {
+		return false, "", err
+	}
+	var loc struct {
+		SolarSystemID int64 `json:"solar_system_id"`
+	}
+	if _, err := c.get(characterID, fmt.Sprintf("/characters/%d/location/", characterID), &loc); err != nil {
+		return true, "", err
+	}
+	return true, c.Names([]int64{loc.SolarSystemID})[loc.SolarSystemID], nil
+}
+
 // Online reports whether the character is currently logged in.
 func (c *Client) Online(characterID int64) (bool, error) {
 	var online struct {

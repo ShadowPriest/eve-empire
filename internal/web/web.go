@@ -45,6 +45,12 @@ type Server struct {
 	Store *store.Store
 	SDE   *sde.DB
 	pages map[string]*template.Template
+
+	// Last seen system per character, for the route modal's "recent
+	// places": a change since the previous /routes/track poll means the
+	// pilot moved, and the new system goes to the top of the list.
+	trackMu  sync.Mutex
+	lastSeen map[int64]string
 }
 
 func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *sde.DB) (*Server, error) {
@@ -353,6 +359,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /bulk/waypoint", s.handleBulkWaypoint)
 	mux.HandleFunc("GET /routes/tree", s.handleRouteTreeGet)
 	mux.HandleFunc("POST /routes/tree", s.handleRouteTreeSave)
+	mux.HandleFunc("POST /routes/track", s.handleRouteTrack)
 	return mux
 }
 
@@ -5380,6 +5387,81 @@ func (s *Server) handleRouteTreeSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// recentPlace is one row of the modal's "recent places" tab.
+type recentPlace struct {
+	System string `json:"system"`
+	TS     int64  `json:"ts"`
+}
+
+// handleRouteTrack: the open route modal polls this. Returns online state
+// and the current system of every requested character, and maintains the
+// "recent places" list — a system a pilot was just seen in floats to the
+// top. Offline and token-less pilots come back online:false, no error.
+func (s *Server) handleRouteTrack(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+		http.Error(w, "ids required", http.StatusBadRequest)
+		return
+	}
+	type status struct {
+		ID     int64  `json:"id"`
+		Online bool   `json:"online"`
+		System string `json:"system"`
+	}
+	statuses := make([]status, len(req.IDs))
+	var wg sync.WaitGroup
+	for i, id := range req.IDs {
+		wg.Add(1)
+		go func(i int, id int64) {
+			defer wg.Done()
+			online, system, _ := s.ESI.Whereabouts(id)
+			statuses[i] = status{ID: id, Online: online, System: system}
+		}(i, id)
+	}
+	wg.Wait()
+
+	s.trackMu.Lock()
+	if s.lastSeen == nil {
+		s.lastSeen = map[int64]string{}
+	}
+	recents := []recentPlace{}
+	if raw := s.Store.Setting("route_recent"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &recents)
+	}
+	changed := false
+	now := time.Now().Unix()
+	for _, st := range statuses {
+		if !st.Online || st.System == "" || s.lastSeen[st.ID] == st.System {
+			continue
+		}
+		s.lastSeen[st.ID] = st.System
+		// float the system to the top (or add it)
+		for i, rc := range recents {
+			if rc.System == st.System {
+				recents = append(recents[:i], recents[i+1:]...)
+				break
+			}
+		}
+		recents = append([]recentPlace{{System: st.System, TS: now}}, recents...)
+		changed = true
+	}
+	if len(recents) > 20 {
+		recents = recents[:20]
+		changed = true
+	}
+	if changed {
+		raw, _ := json.Marshal(recents)
+		if err := s.Store.SetSetting("route_recent", string(raw)); err != nil {
+			log.Printf("route_recent: %v", err)
+		}
+	}
+	s.trackMu.Unlock()
+
+	writeJSON(w, map[string]any{"statuses": statuses, "recents": recents})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

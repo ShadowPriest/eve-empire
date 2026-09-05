@@ -1437,6 +1437,9 @@
   .modal .rquick { display: flex; gap: .4rem; align-items: center; margin: .5rem 0 0; font-size: .8rem; color: #7b8aa0; }
   .modal .rquick button { font-size: .72rem; padding: .15rem .55rem; }
   .modal .routelist { max-height: 45vh; overflow-y: auto; margin: .6rem 0 0; }
+  /* the online dot lives in every row; visibility follows live state */
+  .modal .routelist label .dot { visibility: hidden; }
+  .modal .routelist label.on .dot { visibility: visible; }
   .modal .routelist label { display: flex; align-items: center; gap: .5rem; font-size: .85rem;
     padding: .2rem .3rem; border-radius: 4px; cursor: pointer; color: #7b8aa0; }
   .modal .routelist label:hover { background: #1a2438; }
@@ -1447,19 +1450,57 @@
   .modal .routelist .st.err { color: #ff6b6b; }
   .modal .rclear { font-size: .8rem; color: #c9d4e3; display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
   .modal .rclear input { flex: none; }
-  .modal.routemodal { max-width: 800px; width: 92vw; }
-  .routemodal .rcols { display: flex; gap: 1rem; }
-  .routemodal .rleft { flex: 1.15; min-width: 0; }
-  .routemodal .rright { flex: 1; min-width: 0; border-left: 1px solid #1b2436; padding-left: 1rem; }
+  .modal.routemodal { max-width: 820px; width: 92vw; }
+  .routemodal h3 { display: flex; align-items: center; }
+  .routemodal .rclose { margin-left: auto; background: none; border: none; color: #7b8aa0;
+    font-size: 1.2rem; padding: 0 .2rem; cursor: pointer; line-height: 1; }
+  .routemodal .rclose:hover { color: #fff; }
+  /* Fixed height: the modal must not breathe when the filter narrows the
+     pilot list — both columns scroll inside. */
+  .routemodal .rcols { display: flex; gap: 1rem; height: min(62vh, 640px); }
+  .routemodal .rleft { flex: 1.15; min-width: 0; display: flex; flex-direction: column; }
+  .routemodal .rright { flex: 1; min-width: 0; border-left: 1px solid #1b2436; padding-left: 1rem;
+    display: flex; flex-direction: column; }
+  .routemodal .routelist { flex: 1; max-height: none; }
   .routemodal .rtags { display: flex; flex-wrap: wrap; gap: .3rem; margin: .5rem 0 0; }
   .routemodal .rquick .rcnt { margin-left: auto; color: #4da3ff; }
+  /* bookmarks / recent places tabs */
+  .rtabs { display: flex; gap: .2rem; border-bottom: 1px solid #1b2436; flex: none; }
+  .rtabs .rtab { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+    color: #7b8aa0; font-size: .8rem; padding: .3rem .6rem; cursor: pointer; }
+  .rtabs .rtab:hover { color: #fff; }
+  .rtabs .rtab.active { color: #e8eef7; border-bottom-color: #4da3ff; }
+  .rbtns { display: flex; gap: .5rem; margin-top: .5rem; flex: none; }
+  .rbtns button { font-size: .75rem; padding: .25rem .6rem; }
+  .rmarkform { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; flex: none; }
+  .rmarkform[hidden] { display: none; }
+  .rmarkform input, .rmarkform select { flex: 1; min-width: 8rem; }
+  .rmarkform button { flex: none; font-size: .75rem; padding: .25rem .6rem; }
+  /* recent places rows */
+  .rrec .rtime { margin-left: auto; flex: none; font-size: .7rem; color: #55657d; }
+  .rrec .rs-save { display: none; margin-left: auto; flex: none; font-size: .72rem; color: #4da3ff; white-space: nowrap; }
+  .rrec:hover .rtime { display: none; }
+  .rrec:hover .rs-save { display: inline; }
+  /* "save to…" folder picker */
+  .rsavemenu { position: fixed; z-index: 60; background: #101725; border: 1px solid #2a3a55;
+    border-radius: 6px; padding: .3rem; min-width: 170px; max-width: 260px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+  .rsavemenu .hd { font-size: .68rem; color: #5f708c; padding: .15rem .5rem;
+    text-transform: uppercase; letter-spacing: .08em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rsavemenu .itm { display: block; width: 100%; text-align: left; background: none; border: none;
+    color: #c9d4e3; padding: .25rem .5rem; font-size: .8rem; cursor: pointer; border-radius: 4px; }
+  .rsavemenu .itm:hover { background: #1a2438; }
+  /* destination input row */
+  #rsysform button { flex: none; }
+  #rsysclear { padding: .35rem .55rem; }
+  /* drag target highlight when moving a bookmark between folders */
+  .rfold.dropover > .rfhead { background: #1a2438; outline: 1px dashed #4da3ff; }
+  .rsys.dragging { opacity: .45; }
   /* quick-destination tree */
-  .rtreehead { display: flex; align-items: center; justify-content: space-between;
-    font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: #5f708c; margin-top: .55rem; }
-  .rtree { max-height: 45vh; overflow-y: auto; margin-top: .4rem; font-size: .85rem; }
-  .rtree button, .rtreehead button { background: none; border: none; padding: 0 .25rem; font-size: .85rem;
+  .rtree { flex: 1; overflow-y: auto; margin-top: .4rem; font-size: .85rem; }
+  .rtree button { background: none; border: none; padding: 0 .25rem; font-size: .85rem;
     color: #7b8aa0; cursor: pointer; line-height: 1.2; }
-  .rtree button:hover, .rtreehead button:hover { color: #fff; }
+  .rtree button:hover { color: #fff; }
   .rfold + .rfold { margin-top: .3rem; }
   .rfhead { display: flex; align-items: center; gap: .4rem; cursor: pointer;
     color: #c9d4e3; padding: .15rem .3rem; border-radius: 4px; }
@@ -1473,8 +1514,9 @@
   .rfold.open .rfbody { display: block; }
   .rsys { display: flex; align-items: center; gap: .35rem; padding: .1rem .3rem; border-radius: 4px; color: #a9b6c9; }
   .rsys:hover { background: #1a2438; }
-  .rsys .rs-go { color: #4da3ff; flex: none; }
-  .rsys .rs-go:hover { color: #8ec7ff; }
+  .rsys .rs-go, .rsys .rs-add { color: #4da3ff; flex: none; }
+  .rsys .rs-go:hover, .rsys .rs-add:hover { color: #8ec7ff; }
+  .rsys .rs-add { font-weight: 700; }
   .rsys .rsname { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rsys .rsname:hover { color: #e8eef7; }
   .rsys .rs-del { display: none; margin-left: auto; }
@@ -2245,7 +2287,12 @@
   /* ── modals ─────────────────────────────────────────────── */
   const overlay = document.getElementById('overlay');
   const modal = document.getElementById('modal');
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('visible'); });
+  // A text-selection drag that starts inside the modal and ends outside
+  // lands its click on the overlay (the common ancestor) — that must not
+  // close the modal, so closing also requires the press to start there.
+  let pressOnOverlay = false;
+  overlay.addEventListener('mousedown', e => { pressOnOverlay = e.target === overlay; });
+  overlay.addEventListener('click', e => { if (e.target === overlay && pressOnOverlay) overlay.classList.remove('visible'); });
 
   /* industry job details */
   const fmtISK = v => Number(v).toLocaleString('ru-RU', {maximumFractionDigits: 0}) + ' ISK';
@@ -2515,7 +2562,7 @@
   }
   function closeURL() {
     const p = new URLSearchParams(location.search);
-    ['item', 'bpc', 'me', 'te', 'runs'].forEach(k => p.delete(k));
+    ['item', 'bpc', 'me', 'te', 'runs', 'route'].forEach(k => p.delete(k));
     const q = p.toString();
     return location.pathname + (q ? '?' + q : '');
   }
@@ -2525,7 +2572,7 @@
     // Push a "no modal" entry instead of walking history back: going back
     // by depth could leave the page entirely when the chain started right
     // after a normal navigation.
-    if (history.state && history.state.item) {
+    if (history.state && (history.state.item || history.state.route)) {
       history.pushState({item: 0, depth: 0}, '', closeURL());
     }
   }
@@ -2545,6 +2592,8 @@
     const st = e.state;
     if (st && st.item) {
       openItemInfoUI(st.item, st.bpc === 1, {me: st.me, te: st.te, runs: st.runs});
+    } else if (st && st.route) {
+      openRouteModal(selectedIDs(), true);
     } else {
       overlay.classList.remove('visible');
       modal.className = 'modal';
@@ -2654,7 +2703,7 @@
 
   // Closing goes through history so back/forward stay in sync.
   overlay.addEventListener('click', e => {
-    if (e.target === overlay) closeModal();
+    if (e.target === overlay && pressOnOverlay) closeModal();
   });
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && overlay.classList.contains('visible')) closeModal();
@@ -3309,7 +3358,13 @@
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
   }
 
-  function openRouteModal(preIDs) {
+  function openRouteModal(preIDs, fromHistory) {
+    // Addressable: ?route=1, so a refresh brings the tool back.
+    if (!fromHistory) {
+      const p = new URLSearchParams(location.search);
+      p.set('route', '1');
+      history.pushState({route: 1}, '', location.pathname + '?' + p.toString());
+    }
     const pre = preIDs && preIDs.length ? new Set(preIDs) : null;
     const rows = [...list.querySelectorAll('.char')].map(ch => {
       const id = Number(ch.dataset.id);
@@ -3320,7 +3375,7 @@
         ((pre ? pre.has(id) : online) ? ' checked' : '') + '>' +
         '<img src="https://images.evetech.net/characters/' + id + '/portrait?size=32" alt="">' +
         ch.querySelector('.nm').textContent +
-        (online ? '<i class="dot green" title="в игре"></i>' : '') +
+        '<i class="dot green" title="в игре"></i>' +
         '<span class="st"></span></label>';
     });
     // Same filter chips as the sidebar, starting from its current state.
@@ -3328,7 +3383,7 @@
       '<span class="tag' + (activeTags.has(t.dataset.tag) ? ' active' : '') + '" data-tag="' +
       rEsc(t.dataset.tag) + '">' + rEsc(t.textContent) + '</span>');
     modal.className = 'modal routemodal';
-    modal.innerHTML = '<h3>Установить маршрут</h3>' +
+    modal.innerHTML = '<h3>Установить маршрут<button type="button" class="rclose" id="rclose" title="закрыть">×</button></h3>' +
       '<div class="rcols"><div class="rleft">' +
         '<div class="rtags">' + chips.join('') + '</div>' +
         '<div class="rquick">выбрать: ' +
@@ -3338,10 +3393,24 @@
           '<span class="rcnt" id="rcnt"></span></div>' +
         '<div class="routelist">' + rows.join('') + '</div>' +
       '</div><div class="rright">' +
-        '<div class="rtreehead">Быстрые точки <button type="button" id="raddfold" title="добавить папку">+ папка</button></div>' +
+        '<div class="rtabs">' +
+          '<button type="button" class="rtab active" data-rtab="marks">Закладки</button>' +
+          '<button type="button" class="rtab" data-rtab="recent">Недавние места</button></div>' +
         '<div class="rtree" id="rtree"><span class="muted">загрузка…</span></div>' +
+        '<div class="rtree" id="rrecent" style="display:none"></div>' +
+        '<form class="rmarkform" id="rmarkform" hidden>' +
+          '<input type="text" id="rmarksys" placeholder="система или станция">' +
+          '<select id="rmarkfold"></select>' +
+          '<input type="text" id="rmarknewf" placeholder="название папки" hidden>' +
+          '<button type="submit">Сохранить</button></form>' +
+        '<div class="rbtns" id="rbtns">' +
+          '<button type="button" id="raddfold">Создать папку</button>' +
+          '<button type="button" id="raddmark">Создать закладку</button></div>' +
       '</div></div>' +
-      '<form class="mrow" id="rsysform"><input type="text" id="routesys" placeholder="система или станция — можно скопировать из игры"></form>' +
+      '<form class="mrow" id="rsysform">' +
+        '<input type="text" id="routesys" placeholder="система или станция — можно скопировать из игры">' +
+        '<button type="button" id="rsysclear" title="очистить">×</button>' +
+        '<button type="button" id="rsyssave" title="сохранить в закладки">Сохранить в…</button></form>' +
       '<div class="mrow"><label class="rclear"><input type="checkbox" id="routeclear" checked> заменить текущий маршрут</label>' +
         '<button type="button" id="routego">Установить</button></div>';
     overlay.classList.add('visible');
@@ -3350,6 +3419,7 @@
     fetch('/routes/tree').then(r => r.json())
       .then(t => { routeTree = Array.isArray(t) ? t : []; renderRouteTree(); })
       .catch(() => { document.getElementById('rtree').innerHTML = '<span class="err">дерево не загрузилось</span>'; });
+    startRoutePoll();
     document.getElementById('routesys').focus();
   }
 
@@ -3397,12 +3467,124 @@
           '<span class="racts"><button type="button" class="rf-add" title="добавить систему">+</button>' +
           '<button type="button" class="rf-del" title="удалить папку">×</button></span></div>' +
         '<div class="rfbody">' + (f.systems || []).map((sys, si) =>
-          '<div class="rsys" data-fi="' + fi + '" data-si="' + si + '">' +
-            '<button type="button" class="rs-go" title="установить маршрут выбранным">➤</button>' +
+          '<div class="rsys" draggable="true" data-fi="' + fi + '" data-si="' + si + '">' +
+            '<button type="button" class="rs-go" title="заменить маршрут выбранным">➤</button>' +
+            '<button type="button" class="rs-add" title="добавить точкой, не меняя маршрут">+</button>' +
             '<span class="rsname" title="подставить в поле назначения">' + rEsc(sys) + '</span>' +
-            '<button type="button" class="rs-del" title="убрать из дерева">×</button></div>').join('') +
+            '<button type="button" class="rs-del" title="убрать из закладок">×</button></div>').join('') +
         '</div></div>').join('');
   }
+
+  /* ── recent places: filled by the /routes/track poll ────── */
+  let routeRecents = [];
+  function rAgo(ts) {
+    const m = Math.floor((Date.now() / 1000 - ts) / 60);
+    if (m < 1) return 'только что';
+    if (m < 60) return m + ' мин';
+    const h = Math.floor(m / 60);
+    return h < 24 ? h + ' ч' : Math.floor(h / 24) + ' д';
+  }
+  function renderRecents() {
+    const el = document.getElementById('rrecent');
+    if (!el) return;
+    if (!routeRecents.length) {
+      el.innerHTML = '<span class="muted">пока пусто — сюда лягут системы, где замечены онлайн-пилоты</span>';
+      return;
+    }
+    el.innerHTML = routeRecents.map(rc =>
+      '<div class="rsys rrec" data-sys="' + rEsc(rc.system) + '">' +
+        '<button type="button" class="rs-go" title="заменить маршрут выбранным">➤</button>' +
+        '<button type="button" class="rs-add" title="добавить точкой, не меняя маршрут">+</button>' +
+        '<span class="rsname" title="подставить в поле назначения">' + rEsc(rc.system) + '</span>' +
+        '<span class="rtime">' + rAgo(rc.ts) + '</span>' +
+        '<button type="button" class="rs-save" title="сохранить в закладки">сохранить в…</button></div>').join('');
+  }
+
+  /* ── live tracking while the modal is open ──────────────────
+     Every poll refreshes online dots (pilots log in and out under an
+     open modal) and feeds the recent-places tab. Self-stops when the
+     modal is gone. */
+  let routePollTimer = null;
+  function routePollTick() {
+    if (!overlay.classList.contains('visible') || !modal.classList.contains('routemodal')) {
+      clearInterval(routePollTimer);
+      routePollTimer = null;
+      return;
+    }
+    const ids = [...modal.querySelectorAll('.routelist input')].map(cb => Number(cb.dataset.id));
+    if (!ids.length) return;
+    fetch('/routes/track', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids})
+    })
+      .then(r => r.json())
+      .then(d => {
+        routeRecents = d.recents || [];
+        const by = {};
+        (d.statuses || []).forEach(s => { by[s.id] = s; });
+        modal.querySelectorAll('.routelist label').forEach(row => {
+          const st = by[row.querySelector('input').dataset.id];
+          if (!st) return;
+          row.dataset.online = st.online ? '1' : '';
+          row.querySelector('input').dataset.online = row.dataset.online;
+          row.classList.toggle('on', st.online);
+          row.title = st.system ? 'сейчас в ' + st.system : '';
+        });
+        applyRouteFilter();
+        renderRecents();
+      })
+      .catch(() => {});
+  }
+  function startRoutePoll() {
+    if (routePollTimer) clearInterval(routePollTimer);
+    routePollTimer = setInterval(routePollTick, 30000);
+    routePollTick();
+  }
+
+  /* ── "save to…" folder picker (input row + recent rows) ──── */
+  function closeSaveMenu() {
+    const m = document.querySelector('.rsavemenu');
+    if (m) m.remove();
+  }
+  function addBookmark(fi, system) {
+    system = system.trim();
+    if (!system) return;
+    routeTree[fi].open = true;
+    if (!routeTree[fi].systems.includes(system)) routeTree[fi].systems.push(system);
+    saveRouteTree();
+    renderRouteTree();
+    closeSaveMenu();
+  }
+  function openSaveMenu(anchor, system) {
+    closeSaveMenu();
+    if (!system.trim()) { document.getElementById('routesys').focus(); return; }
+    const menu = document.createElement('div');
+    menu.className = 'rsavemenu';
+    menu.innerHTML = '<div class="hd">«' + rEsc(system) + '» в:</div>' +
+      routeTree.map((f, fi) =>
+        '<button type="button" class="itm" data-fi="' + fi + '">' + rEsc(f.name) + '</button>').join('') +
+      '<button type="button" class="itm" data-fi="-1">+ новая папка…</button>';
+    document.body.appendChild(menu);
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+    menu.style.top = Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8) + 'px';
+    menu.addEventListener('click', e => {
+      const itm = e.target.closest('.itm');
+      if (!itm) return;
+      const fi = Number(itm.dataset.fi);
+      if (fi >= 0) { addBookmark(fi, system); return; }
+      menu.innerHTML = '<div class="hd">новая папка</div>';
+      rNewInput(menu, false, 'название папки', v => {
+        routeTree.push({name: v, open: true, systems: []});
+        addBookmark(routeTree.length - 1, system);
+      });
+    });
+  }
+  document.addEventListener('click', e => {
+    // close the picker on any click outside it (openers close-then-reopen)
+    if (!e.target.closest('.rsavemenu') && !e.target.closest('.rs-save') && e.target.id !== 'rsyssave') closeSaveMenu();
+  });
   // Inline name entry: Enter commits, blur or Escape cancels. Commit rides
   // the form's own submit — keyboard hooks (layout switchers) resynthesize
   // key events with an empty e.key, so sniffing for "Enter" misses them.
@@ -3434,11 +3616,53 @@
     inp.addEventListener('blur', onBlur);
   }
   document.addEventListener('click', e => {
+    if (e.target.id === 'rclose') { closeModal(); return; }
+    const tab = e.target.closest('.rtabs .rtab');
+    if (tab) {
+      modal.querySelectorAll('.rtabs .rtab').forEach(t => t.classList.toggle('active', t === tab));
+      const marks = tab.dataset.rtab === 'marks';
+      document.getElementById('rtree').style.display = marks ? '' : 'none';
+      document.getElementById('rrecent').style.display = marks ? 'none' : '';
+      document.getElementById('rbtns').style.display = marks ? '' : 'none';
+      if (!marks) { document.getElementById('rmarkform').hidden = true; renderRecents(); }
+      return;
+    }
     if (e.target.id === 'raddfold') {
       rNewInput(document.getElementById('rtree'), true, 'название папки', v => {
         routeTree.push({name: v, open: true, systems: []});
         saveRouteTree(); renderRouteTree();
       });
+      return;
+    }
+    if (e.target.id === 'raddmark') {
+      const form = document.getElementById('rmarkform');
+      const sel = document.getElementById('rmarkfold');
+      sel.innerHTML = routeTree.map((f, fi) =>
+        '<option value="' + fi + '">' + rEsc(f.name) + '</option>').join('') +
+        '<option value="-1">+ новая папка…</option>';
+      document.getElementById('rmarknewf').hidden = routeTree.length > 0;
+      form.hidden = false;
+      document.getElementById('rmarksys').focus();
+      return;
+    }
+    // recent places rows live outside the folder tree
+    const rec = e.target.closest('.rrec');
+    if (rec) {
+      const sys = rec.dataset.sys;
+      if (e.target.closest('.rs-go')) sendRoute(sys, true, e.target.closest('.rs-go'));
+      else if (e.target.closest('.rs-add')) sendRoute(sys, false, e.target.closest('.rs-add'));
+      else if (e.target.closest('.rs-save')) openSaveMenu(e.target.closest('.rs-save'), sys);
+      else if (e.target.closest('.rsname')) document.getElementById('routesys').value = sys;
+      return;
+    }
+    if (e.target.id === 'rsysclear') {
+      const inp = document.getElementById('routesys');
+      inp.value = '';
+      inp.focus();
+      return;
+    }
+    if (e.target.id === 'rsyssave') {
+      openSaveMenu(e.target, document.getElementById('routesys').value);
       return;
     }
     const fold = e.target.closest('.rfold');
@@ -3470,6 +3694,8 @@
         saveRouteTree(); renderRouteTree();
       } else if (e.target.closest('.rs-go')) {
         sendRoute(routeTree[fi].systems[si], true, e.target.closest('.rs-go'));
+      } else if (e.target.closest('.rs-add')) {
+        sendRoute(routeTree[fi].systems[si], false, e.target.closest('.rs-add'));
       } else if (e.target.closest('.rsname')) {
         document.getElementById('routesys').value = routeTree[fi].systems[si];
       }
@@ -3501,6 +3727,7 @@
     const ids = [...modal.querySelectorAll('.routelist input:checked')].map(cb => Number(cb.dataset.id));
     if (!ids.length) { alert('Никто не выбран.'); return; }
     const go = document.getElementById('routego');
+    const glyph = treeBtn ? treeBtn.textContent : ''; // ➤ or + — restore after
     go.disabled = true;
     if (treeBtn) treeBtn.textContent = '…'; else go.textContent = 'Устанавливаю…';
     fetch('/bulk/waypoint', {
@@ -3512,7 +3739,7 @@
       .then(data => {
         go.disabled = false;
         if (data.error) {
-          if (treeBtn) treeBtn.textContent = '➤';
+          if (treeBtn) treeBtn.textContent = glyph;
           go.textContent = 'Установить';
           alert('Ошибка: ' + data.error);
           return;
@@ -3523,7 +3750,7 @@
         const fails = markRouteResults(data.results);
         if (treeBtn) {
           treeBtn.textContent = fails ? '✕' : '✓';
-          setTimeout(() => { treeBtn.textContent = '➤'; }, 2000);
+          setTimeout(() => { treeBtn.textContent = glyph; }, 2000);
           go.textContent = 'Установить';
         } else {
           go.textContent = fails ? 'Повторить' : 'Готово ✓';
@@ -3531,7 +3758,7 @@
       })
       .catch(err => {
         go.disabled = false;
-        if (treeBtn) treeBtn.textContent = '➤';
+        if (treeBtn) treeBtn.textContent = glyph;
         go.textContent = 'Установить';
         alert('Ошибка: ' + err.message);
       });
@@ -3558,8 +3785,82 @@
     sendRoute(system, document.getElementById('routeclear').checked, null);
   });
   document.addEventListener('submit', e => {
-    if (e.target.id === 'rsysform') { e.preventDefault(); document.getElementById('routego').click(); }
+    if (e.target.id === 'rsysform') { e.preventDefault(); document.getElementById('routego').click(); return; }
+    if (e.target.id !== 'rmarkform') return;
+    e.preventDefault();
+    const sys = document.getElementById('rmarksys').value.trim();
+    if (!sys) { document.getElementById('rmarksys').focus(); return; }
+    let fi = Number(document.getElementById('rmarkfold').value);
+    if (fi === -1) {
+      const nf = document.getElementById('rmarknewf').value.trim();
+      if (!nf) { document.getElementById('rmarknewf').focus(); return; }
+      routeTree.push({name: nf, open: true, systems: []});
+      fi = routeTree.length - 1;
+    }
+    addBookmark(fi, sys);
+    e.target.hidden = true;
   });
+  document.addEventListener('change', e => {
+    if (e.target.id === 'rmarkfold') {
+      document.getElementById('rmarknewf').hidden = e.target.value !== '-1';
+    }
+  });
+  // Select-on-focus: the field usually gets a fresh paste from the game,
+  // so a click should leave it ready to be typed over. The mouseup guard
+  // stops Chrome from collapsing the selection right after focus.
+  document.addEventListener('focusin', e => {
+    if (e.target.id === 'routesys') { e.target.select(); e.target.dataset.justFocused = '1'; }
+  });
+  document.addEventListener('mouseup', e => {
+    if (e.target.id === 'routesys' && e.target.dataset.justFocused) {
+      delete e.target.dataset.justFocused;
+      e.preventDefault();
+    }
+  });
+
+  /* ── dragging a bookmark between folders ────────────────── */
+  let rDragMark = null;
+  modal.addEventListener('dragstart', e => {
+    const row = e.target.closest('.rsys:not(.rrec)');
+    if (!row) return;
+    rDragMark = {fi: Number(row.dataset.fi), si: Number(row.dataset.si)};
+    row.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  modal.addEventListener('dragover', e => {
+    if (!rDragMark) return;
+    const fold = e.target.closest('.rfold');
+    modal.querySelectorAll('.rfold.dropover').forEach(f => f.classList.remove('dropover'));
+    if (fold && Number(fold.dataset.fi) !== rDragMark.fi) {
+      e.preventDefault();
+      fold.classList.add('dropover');
+    }
+  });
+  modal.addEventListener('drop', e => {
+    if (!rDragMark) return;
+    e.preventDefault();
+    const fold = e.target.closest('.rfold');
+    if (fold && Number(fold.dataset.fi) !== rDragMark.fi) {
+      const to = Number(fold.dataset.fi);
+      const [sys] = routeTree[rDragMark.fi].systems.splice(rDragMark.si, 1);
+      if (!routeTree[to].systems.includes(sys)) routeTree[to].systems.push(sys);
+      routeTree[to].open = true;
+      saveRouteTree();
+      renderRouteTree();
+    }
+  });
+  modal.addEventListener('dragend', () => {
+    rDragMark = null;
+    modal.querySelectorAll('.rfold.dropover').forEach(f => f.classList.remove('dropover'));
+    modal.querySelectorAll('.rsys.dragging').forEach(r => r.classList.remove('dragging'));
+  });
+
+  // ?route=1 in the address reopens the tool after a refresh. Runs last:
+  // openRouteModal touches let-bindings declared through this block.
+  if (new URLSearchParams(location.search).has('route')) {
+    history.replaceState({route: 1}, '', location.href);
+    openRouteModal(selectedIDs(), true);
+  }
 
   /* ── drag & drop ordering ───────────────────────────────── */
   let dragChar = null, dragGroup = null;
