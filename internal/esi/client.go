@@ -3,14 +3,17 @@
 // and in SQLite (honouring the Expires header) and batch-resolves names.
 //
 // A Client can produce a StaleView: a request-scoped variant that serves
-// expired cache entries instead of hitting the network and records
-// whether any stale data was returned — the web layer uses this to
-// render instantly from cache and revalidate asynchronously.
+// cache entries (fresh or expired) and never touches the network. Every
+// read registers its URL with the ESI Refresher (refresher.go), which
+// keeps the cache warm in the background; the view only records whether
+// something stale was served so the page can poll for the refreshed
+// render.
 package esi
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,14 +48,24 @@ type state struct {
 	userAgent string
 	sso       *sso.Client
 	store     *store.Store
-	language  atomic.Value // string; "" or "en" = ESI default
+	language  atomic.Value  // string; "" or "en" = ESI default
 	sem       chan struct{} // bounds concurrent network fetches
 
 	mu       sync.Mutex
-	cache    map[string]cacheEntry // URL -> cached response body (memory tier)
-	names    map[int64]string      // entity id -> name (memory tier)
+	cache    map[string]cacheEntry    // URL -> cached response body (memory tier)
+	names    map[int64]string         // entity id -> name (memory tier)
 	inflight map[string]*inflightCall // URL -> network fetch in progress
+	// deadTokens remembers characters whose refresh token the SSO just
+	// rejected (invalid_grant: issued by the other copy's application,
+	// or revoked). Every URL of such an alt would otherwise hit the SSO
+	// separately; one failure per character per deadTokenFor is enough.
+	deadTokens map[int64]time.Time
+
+	reg *Refresher // registry of every URL read; keeps the cache warm
 }
+
+// deadTokenFor is how long a rejected refresh token is not retried.
+const deadTokenFor = 10 * time.Minute
 
 // inflightCall coalesces concurrent fetches of one URL: the sidebar and
 // the page ask for the same data, and a navigation mid-revalidation
@@ -69,16 +82,61 @@ type cacheEntry struct {
 	body    []byte
 	pages   int
 	expires time.Time
+	fetched time.Time // when the body was received; zero for pre-migration rows
 }
+
+// ErrNoToken marks a character this copy holds no token for.
+var ErrNoToken = errors.New("нет токена")
 
 type Client struct {
 	st *state
 
-	// allowStale: serve expired cache entries without revalidating.
+	// allowStale: serve cache entries (fresh or expired) and never hit
+	// the network; reads register with the refresher instead.
 	allowStale bool
-	// staleHit is set when an expired (or missing-from-network) entry
-	// was served; nil on the primary client.
-	staleHit *atomic.Bool
+	// background: a stale view whose reads must not make entries hot
+	// (the sidebar) and whose refresh errors are not the page's problem.
+	background bool
+	// view collects what happened during one request; nil on the
+	// primary client.
+	view *ViewStatus
+}
+
+// ViewStatus is what a request-scoped view reports back to the page.
+type ViewStatus struct {
+	// Page is the request URI the render belongs to; the web layer sets
+	// it so the render can be recorded as that page's dependency set.
+	Page string
+
+	stale atomic.Bool
+	mu    sync.Mutex
+	errs  []string
+	urls  map[string]bool // URL -> read by the page itself (true) or a background view (false)
+}
+
+// Deps lists every URL read during the request: true for the page's own
+// reads, false for background (sidebar) ones.
+func (v *ViewStatus) Deps() map[string]bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	out := make(map[string]bool, len(v.urls))
+	for u, own := range v.urls {
+		out[u] = own
+	}
+	return out
+}
+
+// Stale reports whether an expired or missing entry was served and the
+// refresher has been asked for it, i.e. a re-render will be fresher.
+func (v *ViewStatus) Stale() bool { return v.stale.Load() }
+
+// Errors lists refresh failures behind the data served (an entry that is
+// backing off after an ESI error); they replace the page's own network
+// errors of the old strict path.
+func (v *ViewStatus) Errors() []string {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return append([]string(nil), v.errs...)
 }
 
 func New(ssoClient *sso.Client, st *store.Store, userAgent string) *Client {
@@ -92,16 +150,19 @@ func New(ssoClient *sso.Client, st *store.Store, userAgent string) *Client {
 		MaxIdleConnsPerHost: maxParallelFetches,
 		IdleConnTimeout:     90 * time.Second,
 	}
-	return &Client{st: &state{
-		http:      &http.Client{Timeout: 30 * time.Second, Transport: transport},
-		userAgent: userAgent,
-		sso:       ssoClient,
-		store:     st,
-		sem:       make(chan struct{}, maxParallelFetches),
-		cache:     map[string]cacheEntry{},
-		names:     map[int64]string{},
-		inflight:  map[string]*inflightCall{},
-	}}
+	s := &state{
+		http:       &http.Client{Timeout: 30 * time.Second, Transport: transport},
+		userAgent:  userAgent,
+		sso:        ssoClient,
+		store:      st,
+		sem:        make(chan struct{}, maxParallelFetches),
+		cache:      map[string]cacheEntry{},
+		names:      map[int64]string{},
+		inflight:   map[string]*inflightCall{},
+		deadTokens: map[int64]time.Time{},
+	}
+	s.reg = newRefresher(s)
+	return &Client{st: s}
 }
 
 // SetLanguage switches the language ESI localizes responses to
@@ -116,18 +177,53 @@ func (c *Client) language() string {
 	return ""
 }
 
-// StaleView returns a request-scoped client that prefers cached data
-// (fresh or expired) and never blocks on the network when a cache entry
-// exists. The returned flag reports whether stale data was served.
-func (c *Client) StaleView() (*Client, *atomic.Bool) {
-	flag := &atomic.Bool{}
-	return &Client{st: c.st, allowStale: true, staleHit: flag}, flag
+// StaleView returns a request-scoped client that serves cached data
+// (fresh or expired) and never blocks on the network. Its reads mark
+// entries hot for the refresher. The status reports what was served.
+func (c *Client) StaleView() (*Client, *ViewStatus) {
+	v := &ViewStatus{}
+	return &Client{st: c.st, allowStale: true, view: v}, v
+}
+
+// Background derives a view for data that is always on screen (the
+// sidebar): same cache, same stale flag, but its reads stay in the warm
+// tier and its refresh errors are not reported on the page.
+func (c *Client) Background() *Client {
+	if !c.allowStale {
+		return c
+	}
+	return &Client{st: c.st, allowStale: true, background: true, view: c.view}
 }
 
 func (c *Client) markStale() {
-	if c.staleHit != nil {
-		c.staleHit.Store(true)
+	if c.view != nil {
+		c.view.stale.Store(true)
 	}
+}
+
+func (c *Client) noteRead(url string) {
+	if c.view == nil {
+		return
+	}
+	c.view.mu.Lock()
+	if c.view.urls == nil {
+		c.view.urls = map[string]bool{}
+	}
+	if !c.background {
+		c.view.urls[url] = true
+	} else if _, ok := c.view.urls[url]; !ok {
+		c.view.urls[url] = false
+	}
+	c.view.mu.Unlock()
+}
+
+func (c *Client) noteErr(msg string) {
+	if c.view == nil || c.background {
+		return
+	}
+	c.view.mu.Lock()
+	c.view.errs = append(c.view.errs, msg)
+	c.view.mu.Unlock()
 }
 
 // accessToken returns a valid access token for the character,
@@ -135,10 +231,17 @@ func (c *Client) markStale() {
 func (c *Client) accessToken(characterID int64) (string, error) {
 	tok, exp, err := c.st.store.AccessToken(characterID)
 	if err != nil {
-		return "", fmt.Errorf("no token for character %d: %w", characterID, err)
+		return "", fmt.Errorf("%w для персонажа %d: %v", ErrNoToken, characterID, err)
 	}
 	if time.Until(exp) > time.Minute {
 		return tok, nil
+	}
+
+	c.st.mu.Lock()
+	dead := c.st.deadTokens[characterID]
+	c.st.mu.Unlock()
+	if time.Now().Before(dead) {
+		return "", fmt.Errorf("%w: персонаж %d — токен отклонён SSO, нужен перелогин на /reauth", ErrNoToken, characterID)
 	}
 
 	rt, err := c.st.store.RefreshToken(characterID)
@@ -147,8 +250,18 @@ func (c *Client) accessToken(characterID int64) (string, error) {
 	}
 	newTok, err := c.st.sso.Refresh(rt)
 	if err != nil {
-		return "", fmt.Errorf("refresh token for character %d: %w", characterID, err)
+		// Usually invalid_grant: a token issued by the other copy's
+		// application (see reauth.go). Remembered per character so the
+		// other URLs of this alt fail fast instead of each asking the
+		// SSO again; retried after deadTokenFor in case of a re-login.
+		c.st.mu.Lock()
+		c.st.deadTokens[characterID] = time.Now().Add(deadTokenFor)
+		c.st.mu.Unlock()
+		return "", fmt.Errorf("%w: обновление токена персонажа %d: %v", ErrNoToken, characterID, err)
 	}
+	c.st.mu.Lock()
+	delete(c.st.deadTokens, characterID)
+	c.st.mu.Unlock()
 	// EVE rotates refresh tokens — always store the returned one.
 	exp = time.Now().Add(time.Duration(newTok.ExpiresIn) * time.Second)
 	if err := c.st.store.UpdateTokens(characterID, newTok.RefreshToken, newTok.AccessToken, exp); err != nil {
@@ -186,8 +299,8 @@ func (c *Client) getURL(characterID int64, url string, compat bool, out any) (in
 
 	// SQLite tier.
 	if !inMem {
-		if body, pages, expires, ok := c.st.store.CacheGet(url); ok {
-			entry = cacheEntry{body: body, pages: pages, expires: expires}
+		if body, meta, ok := c.st.store.CacheGet(url); ok {
+			entry = cacheEntry{body: body, pages: meta.Pages, expires: meta.Expires, fetched: meta.Fetched}
 			inMem = true
 			c.st.mu.Lock()
 			c.st.cache[url] = entry
@@ -195,31 +308,55 @@ func (c *Client) getURL(characterID int64, url string, compat bool, out any) (in
 		}
 	}
 
+	// Every read registers with the refresher: a page view makes the
+	// entry hot, everything else just keeps it warm. pending: a fetch is
+	// imminent, so the page may call itself stale and poll for it.
+	pending := c.st.reg.touch(url, characterID, compat, entry, inMem, c.allowStale && !c.background)
+	c.noteRead(url)
+
 	if inMem {
 		if now.Before(entry.expires) {
 			return entry.pages, json.Unmarshal(entry.body, out)
 		}
 		if c.allowStale {
-			c.markStale()
+			// Expired: if the refresher is backing off after an error, say
+			// so instead of promising a fresher render. A background
+			// (sidebar) read or a static kind is not marked stale: the
+			// entry is warm (may legitimately wait several TTLs) or never
+			// refetched, so a poll would only churn.
+			if msg := c.st.reg.failing(url); msg != "" {
+				c.noteErr(msg)
+			} else if pending {
+				c.markStale()
+			}
 			return entry.pages, json.Unmarshal(entry.body, out)
 		}
 	} else if c.allowStale {
-		// Nothing cached at all — a stale view must not block on the
-		// network; report stale so the caller triggers a revalidation.
+		// Nothing cached at all: a stale view must not block on the
+		// network. Report stale so the page polls for the refreshed render.
+		if msg := c.st.reg.failing(url); msg != "" {
+			return 0, fmt.Errorf("%s", msg)
+		}
 		c.markStale()
 		return 0, fmt.Errorf("нет кэша (данные загружаются)")
 	}
 
-	// Network — the first caller fetches, concurrent callers of the
-	// same URL wait for its result instead of duplicating the request.
+	body, pages, err := c.load(characterID, url, compat)
+	if err != nil {
+		return 0, err
+	}
+	return pages, json.Unmarshal(body, out)
+}
+
+// load performs the network fetch with in-flight coalescing: the first
+// caller fetches, concurrent callers of the same URL wait for its result
+// instead of duplicating the request.
+func (c *Client) load(characterID int64, url string, compat bool) ([]byte, int, error) {
 	c.st.mu.Lock()
 	if call, ok := c.st.inflight[url]; ok {
 		c.st.mu.Unlock()
 		<-call.done
-		if call.err != nil {
-			return 0, call.err
-		}
-		return call.pages, json.Unmarshal(call.body, out)
+		return call.body, call.pages, call.err
 	}
 	call := &inflightCall{done: make(chan struct{})}
 	c.st.inflight[url] = call
@@ -231,11 +368,7 @@ func (c *Client) getURL(characterID int64, url string, compat bool, out any) (in
 	delete(c.st.inflight, url)
 	c.st.mu.Unlock()
 	close(call.done)
-
-	if call.err != nil {
-		return 0, call.err
-	}
-	return call.pages, json.Unmarshal(call.body, out)
+	return call.body, call.pages, call.err
 }
 
 // fetch performs the actual network request and stores the response in
@@ -272,6 +405,8 @@ func (c *Client) fetch(characterID int64, url string, compat bool) ([]byte, int,
 	if err != nil {
 		return nil, 0, err
 	}
+	remain, reset := errorBudget(resp)
+	c.st.reg.budget(remain, reset, resp.StatusCode == 420)
 	if resp.StatusCode != http.StatusOK {
 		return nil, 0, fmt.Errorf("esi %s: %s: %s", url, resp.Status, truncate(body, 200))
 	}
@@ -279,16 +414,42 @@ func (c *Client) fetch(characterID int64, url string, compat bool) ([]byte, int,
 	pages := 1
 	fmt.Sscanf(resp.Header.Get("X-Pages"), "%d", &pages)
 
-	expires := time.Now().Add(30 * time.Second)
+	fetched := time.Now()
+	expires := fetched.Add(30 * time.Second)
 	if t, err := time.Parse(http.TimeFormat, resp.Header.Get("Expires")); err == nil {
 		expires = t
 	}
 	c.st.mu.Lock()
-	c.st.cache[url] = cacheEntry{body: body, pages: pages, expires: expires}
+	old, had := c.st.cache[url]
+	c.st.cache[url] = cacheEntry{body: body, pages: pages, expires: expires, fetched: fetched}
 	c.st.mu.Unlock()
-	c.st.store.CachePut(url, body, pages, expires)
+	// Most refreshes bring back the same bytes (a sleeping alt's wallet
+	// does not move): then only the deadline is renewed — no blob write,
+	// no page event.
+	changed := !had || !bytes.Equal(old.body, body)
+	if changed {
+		c.st.store.CachePut(url, body, store.CacheMeta{
+			CharID: characterID, Compat: compat, Pages: pages, Expires: expires, Fetched: fetched,
+		})
+	} else {
+		c.st.store.CacheRenew(url, expires, fetched)
+	}
+	c.st.reg.observe(url, characterID, compat, expires, fetched)
+	if changed {
+		c.st.reg.notify(url)
+	}
 
 	return body, pages, nil
+}
+
+// errorBudget reads the ESI error-limit headers (errors left in the
+// current window and seconds until it resets). Missing headers read as
+// a full budget.
+func errorBudget(resp *http.Response) (remain, reset int) {
+	remain = 100
+	fmt.Sscanf(resp.Header.Get("X-ESI-Error-Limit-Remain"), "%d", &remain)
+	fmt.Sscanf(resp.Header.Get("X-ESI-Error-Limit-Reset"), "%d", &reset)
+	return remain, reset
 }
 
 // post performs an authenticated POST (no caching, e.g. UI actions).

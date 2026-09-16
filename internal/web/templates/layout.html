@@ -108,7 +108,31 @@
   .gearmenu a:hover { background: #1a2438; color: #fff; }
   .gearmenu a.disabled { color: #3f4b5f; cursor: default; }
   .gearmenu a.disabled:hover { background: none; color: #3f4b5f; }
-  .esistatus .dot { margin: 0; width: 11px; height: 11px; cursor: default; }
+  .esistatus .dot { margin: 0; width: 11px; height: 11px; cursor: pointer; }
+  /* панель ESI Refresher: сводная строка вида + раскрывающийся список ручек */
+  .reftbl { font-size: .8rem; }
+  .refrow {
+    display: grid; gap: .4rem; align-items: center; padding: .25rem .4rem;
+    grid-template-columns: minmax(150px, 1.4fr) 55px 70px 80px 90px 70px 90px 60px 60px 100px 110px;
+  }
+  .refhead { color: #7b8aa0; border-bottom: 1px solid #1f2a3d; font-size: .75rem; }
+  details.refkind > summary { list-style: none; cursor: pointer; border-bottom: 1px solid #161d2b; }
+  details.refkind > summary::-webkit-details-marker { display: none; }
+  details.refkind > summary:hover { background: #151c2a; }
+  details.refkind.empty > summary { color: #55657d; }
+  details.refkind[open] > summary { background: #151c2a; }
+  .refkind .multin { width: 62px; padding: .1rem .25rem; font-size: .8rem; background: #0d1119;
+    color: #e8eef7; border: 1px solid #1f2a3d; border-radius: 4px; }
+  .refentries { margin: .2rem 0 .6rem 1rem; width: calc(100% - 1rem); font-size: .76rem; }
+  .refentries tr.failing td { color: #e0b25f; }
+  .refentries td.mono { font-family: ui-monospace, Consolas, monospace; }
+  .reftbl { overflow-x: auto; }
+  /* блок, только что подменённый живым обновлением: короткая полоска слева */
+  #main > .fresh { animation: freshfade 1.6s ease-out; }
+  @keyframes freshfade {
+    from { box-shadow: inset 3px 0 0 #4da3ff; }
+    to   { box-shadow: inset 3px 0 0 transparent; }
+  }
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
          background: #3a4557; margin-left: .5rem; }
   .dot.on, .dot.green { background: #5fd38d; box-shadow: 0 0 6px #5fd38d; }
@@ -1698,11 +1722,12 @@
       </li>
     </ul>
     <div class="esistatus">
-      <span class="dot green" id="esistatus" title="Данные актуальны"></span>
+      <span class="dot green" id="esistatus" title="Данные актуальны · клик — обновить сейчас"></span>
       <div class="gearbox">
         <button class="gear" id="gearbtn" type="button" title="Меню">⚙</button>
         <ul class="gearmenu" id="gearmenu">
           <li><a href="/settings">Настройки</a></li>
+          <li><a href="/refresher">ESI Refresher</a></li>
           <li><a id="aboutlink">О программе</a></li>
           <li><a class="disabled" title="Авторизация появится позже">Выход</a></li>
         </ul>
@@ -1889,8 +1914,28 @@
   const status = document.getElementById('esistatus');
   function setStatus(kind, tip) {
     status.className = 'dot ' + kind;
-    status.title = tip || {green: 'Данные актуальны', yellow: 'Загрузка данных…', red: 'Ошибка ESI'}[kind];
+    status.title = (tip || {green: 'Данные актуальны', yellow: 'Загрузка данных…', red: 'Ошибка ESI'}[kind])
+      + ' · клик — обновить сейчас';
   }
+  /* «Обновить сейчас»: просроченные ручки открытой страницы — в голову
+     очереди ESI Refresher. Ниже срока кэша ESI кнопка бессильна (CCP
+     отдаёт тот же снимок), поэтому в ответе — через сколько можно. */
+  status.addEventListener('click', () => {
+    const page = location.pathname + location.search;
+    setStatus('yellow', 'Поднимаю ручки страницы…');
+    fetch('/api/refresher/now', {method: 'POST', body: new URLSearchParams({page})})
+      .then(r => r.json())
+      .then(j => {
+        let tip;
+        if (!j.routes) tip = 'У этой страницы нет ручек ESI';
+        else if (j.boosted) tip = 'Поднято ручек: ' + j.boosted + ' из ' + j.routes
+          + (j.next_s ? '; остальные можно не раньше чем через ' + j.next_s + ' с' : '');
+        else tip = 'Всё свежее; следующее обновление возможно через ' + j.next_s + ' с';
+        setStatus(j.boosted ? 'yellow' : 'green', tip);
+        if (j.boosted) setTimeout(() => { if (status.className.includes('yellow')) applyErrors(); }, 8000);
+      })
+      .catch(() => setStatus('red', 'Не удалось запросить обновление'));
+  });
   function applyErrors() {
     const errs = document.body.dataset.errors && document.body.dataset.errors.trim();
     if (errs) setStatus('red', errs); else setStatus('green');
@@ -2014,37 +2059,129 @@
     });
   }
 
-  /* Общий хвост после любой смены центра. */
-  function afterMain() {
+  /* Общий хвост после любой смены центра. roots — подменённые блоки
+     (по умолчанию весь #main); page:swap несёт их в detail.blocks. */
+  function afterMain(roots) {
+    roots = roots || [document.getElementById('main')];
     applyErrors();
     initCountdowns();
     initRings();
     applySetgroups();
-    runPageScripts(document.getElementById('main'));
-    document.dispatchEvent(new CustomEvent('page:swap'));
+    roots.forEach(runPageScripts);
+    document.dispatchEvent(new CustomEvent('page:swap', {detail: {blocks: roots}}));
   }
 
-  /* Ревалидация протухшего кэша: та же страница, но со свежими данными. */
-  function revalidate() {
-    if (document.body.dataset.stale !== '1') return;
+  /* Опрос до свежих данных. Страница помечена Stale, пока ESI Refresher
+     не дотянул её ручки; сеть в рендере больше не участвует, так что
+     повторный запрос — миллисекунды из тёплого кэша. Шаг растёт, потолок
+     около двух минут; после него точка остаётся жёлтой — данные едут,
+     просто долго (большое имущество под семафором). Центр подменяется
+     только если HTML реально изменился. Этап 2 заменит опрос на SSE и
+     блочную подмену (TASKS.md, «ESI Refresher»). */
+  const POLL_STEPS = [1000, 2000, 3000, 5000, 8000, 10000, 15000, 20000, 30000, 30000];
+  let pollTimer = null;
+  function revalidate(attempt) {
+    attempt = attempt || 0;
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    if (document.body.dataset.stale !== '1') { applyErrors(); return; }
     setStatus('yellow');
+    if (attempt >= POLL_STEPS.length) {
+      setStatus('yellow', 'Данные всё ещё загружаются — обновите страницу позже');
+      return;
+    }
     const url = location.href;
-    fetch(url, {headers: {'X-Fresh': '1'}})
+    pollTimer = setTimeout(() => {
+      pollTimer = null;
+      fetch(url)
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+        .then(html => {
+          if (location.href !== url) return;   // пока ждали, ушли на другую страницу
+          applyFresh(new DOMParser().parseFromString(html, 'text/html'));
+          revalidate(attempt + 1);
+        })
+        .catch(e => setStatus('red', 'Не удалось обновить: ' + e.message));
+    }, POLL_STEPS[attempt]);
+  }
+  revalidate();
+
+  /* ── живые обновления: SSE и блочная подмена ────────────────
+     Само соединение и есть подписка: пока оно открыто, ручки страницы
+     у ESI Refresher горячие. Сервер шлёт событие, когда тело какой-то
+     из них реально изменилось; браузер перезапрашивает страницу (из
+     тёплого кэша — миллисекунды) и подменяет только изменившиеся
+     блоки — верхнеуровневые элементы #main. Блок, в котором сейчас
+     фокус или выделение, не трогается до следующего события. */
+  function busy(el) {
+    const a = document.activeElement;
+    if (a && a !== document.body && el.contains(a)) return true;
+    const sel = window.getSelection();
+    return !!(sel && !sel.isCollapsed && sel.anchorNode && el.contains(sel.anchorNode));
+  }
+  /* Применить свежий документ к странице; вернуть число подменённых блоков. */
+  function applyFresh(doc, kinds) {
+    const fresh = doc.getElementById('main');
+    const cur = document.getElementById('main');
+    let swapped = [];
+    if (fresh) {
+      const a = [...cur.children], b = [...fresh.children];
+      const sameShape = a.length === b.length && a.every((el, i) =>
+        el.tagName === b[i].tagName && (el.dataset.block || '') === (b[i].dataset.block || ''));
+      if (sameShape) {
+        a.forEach((el, i) => {
+          if (el.outerHTML === b[i].outerHTML || busy(el)) return;
+          el.replaceWith(b[i]);
+          b[i].classList.add('fresh');
+          swapped.push(b[i]);
+        });
+      } else if (!busy(cur)) {
+        cur.innerHTML = fresh.innerHTML;
+        swapped = [cur];
+      }
+    }
+    syncSidebar(doc);
+    syncMenu(doc);
+    document.body.dataset.stale = doc.body.dataset.stale || '';
+    document.body.dataset.errors = doc.body.dataset.errors || '';
+    if (swapped.length) afterMain(swapped); else applyErrors();
+    if (kinds && kinds.length && !document.body.dataset.errors.trim())
+      status.title = 'Обновлено ' + new Date().toLocaleTimeString() + ': ' + kinds.join(', ');
+    return swapped.length;
+  }
+  document.addEventListener('animationend', e => {
+    if (e.animationName === 'freshfade') e.target.classList.remove('fresh');
+  });
+
+  let events = null, eventsPage = null, refetchTimer = null;
+  function subscribe() {
+    const page = location.pathname + location.search;
+    if (events && eventsPage === page) return;
+    if (events) events.close();
+    eventsPage = page;
+    events = new EventSource('/events?page=' + encodeURIComponent(page));
+    events.onmessage = e => {
+      let kinds = [];
+      try { kinds = JSON.parse(e.data).kinds || []; } catch (x) {}
+      if (refetchTimer) return;                 // пачка событий — один запрос
+      refetchTimer = setTimeout(() => { refetchTimer = null; refetch(kinds); }, 800);
+    };
+    /* обрыв: EventSource переподключится сам (retry шлёт сервер) */
+  }
+  function refetch(kinds) {
+    const url = location.href;
+    fetch(url)
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
       .then(html => {
-        if (location.href !== url) return;   // пока грузили, ушли на другую страницу
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        const fresh = doc.getElementById('main');
-        if (fresh) document.getElementById('main').innerHTML = fresh.innerHTML;
-        syncSidebar(doc);
-        syncMenu(doc);
-        document.body.dataset.stale = '';
-        document.body.dataset.errors = doc.body.dataset.errors || '';
-        afterMain();
+        if (location.href !== url) return;
+        applyFresh(new DOMParser().parseFromString(html, 'text/html'), kinds);
       })
       .catch(e => setStatus('red', 'Не удалось обновить: ' + e.message));
   }
-  revalidate();
+  subscribe();
+  /* отладочная ручка для консоли и панели этапа 3 */
+  window.eeLive = {
+    applyFresh,
+    state: () => ({page: eventsPage, ready: events ? events.readyState : -1}),
+  };
 
   /* ── переходы: меняется только центр ───────────────────────
      Ссылки остаются настоящими <a href="...">: без JS, в новой вкладке и
@@ -2066,6 +2203,7 @@
     markSidebar();
     afterMain();
     revalidate();
+    subscribe();
   }
   function navigate(url, push) {
     setStatus('yellow');
@@ -4023,7 +4161,7 @@
       const a = document.activeElement;
       // never yank the ground from under an open editor or picker
       if (a && a.matches('textarea, select, input')) return;
-      fetch(location.href, {headers: {'X-Fresh': '1'}})
+      fetch(location.href)
         .then(r => r.text())
         .then(html => {
           const doc = new DOMParser().parseFromString(html, 'text/html');

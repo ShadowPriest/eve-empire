@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"eve-empire/internal/esi"
@@ -51,6 +50,10 @@ type Server struct {
 	// pilot moved, and the new system goes to the top of the list.
 	trackMu  sync.Mutex
 	lastSeen map[int64]string
+
+	// Live updates over SSE (events.go), created on first use.
+	hubOnce sync.Once
+	hub     *hub
 }
 
 func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *sde.DB) (*Server, error) {
@@ -269,6 +272,7 @@ func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *s
 		"empire_planets", "empire_wallets", "empire_training", "empire_industry", "fleet",
 		"mining", "ore", "market_watch", "build", "orders", "mail", "empire_structures",
 		"reauth", "accounting", "spfarm", "spfarm_model", "plex_vault", "empire_air",
+		"refresher",
 	} {
 		t, err := template.Must(layout.Clone()).ParseFS(templateFS, "templates/"+name+".html")
 		if err != nil {
@@ -354,6 +358,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /corporations/{id}/assets", s.handleCorpAssets)
 	mux.HandleFunc("GET /api/market", s.handleMarketDepth)
 	mux.HandleFunc("GET /api/type/{id}", s.handleTypeInfo)
+	mux.HandleFunc("GET /api/refresher", s.handleRefresher)
+	mux.HandleFunc("GET /refresher", s.handleRefresherPage)
+	mux.HandleFunc("POST /api/refresher/mult", s.handleRefresherMult)
+	mux.HandleFunc("POST /api/refresher/now", s.handleRefresherNow)
+	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("GET /icons/{id}", s.handleIcon)
 	mux.HandleFunc("POST /sidebar/order", s.handleSidebarOrder)
 	mux.HandleFunc("POST /bulk/waypoint", s.handleBulkWaypoint)
@@ -363,14 +372,26 @@ func (s *Server) Routes() http.Handler {
 	return mux
 }
 
-// esiFor picks the ESI view for a request: the default is the stale
-// view (instant render from cache); a revalidation request (X-Fresh
-// header, sent by the page's own JS) uses the strict client.
-func (s *Server) esiFor(r *http.Request) (*esi.Client, *atomic.Bool) {
-	if r.Header.Get("X-Fresh") == "1" {
-		return s.ESI, nil
-	}
-	return s.ESI.StaleView()
+// handleRefresher exposes the ESI Refresher registry as JSON — the raw
+// feed for the panel (TASKS.md, «ESI Refresher», stage 3) and a way to
+// see what is hot, due or failing until then. ?filter=hot|failing|due.
+func (s *Server) handleRefresher(w http.ResponseWriter, r *http.Request) {
+	reg := s.ESI.Refresher()
+	writeJSON(w, map[string]any{
+		"summary": reg.Snapshot(),
+		"entries": reg.Entries(r.URL.Query().Get("filter")),
+	})
+}
+
+// esiFor gives a page its ESI view: always the stale view. Handlers
+// never touch the network — they render what the cache has, the ESI
+// Refresher fetches what the read marked hot, and the page polls (later:
+// listens) for the fresher render. Live data (fleet, market depth) and
+// POST actions keep using s.ESI directly.
+func (s *Server) esiFor(r *http.Request) (*esi.Client, *esi.ViewStatus) {
+	ec, view := s.ESI.StaleView()
+	view.Page = r.URL.RequestURI()
+	return ec, view
 }
 
 // ── shell data (sidebar + menu) ──────────────────────────────────────
@@ -506,6 +527,9 @@ var charSections = map[string]bool{
 }
 
 func (s *Server) shell(ec *esi.Client, selectedID int64, section string) (map[string]any, *store.Character, error) {
+	// The sidebar is on every screen: its reads stay in the refresher's
+	// warm tier so thirty alts never outrank the page being looked at.
+	ec = ec.Background()
 	// Section — это подстраница ПЕРСОНАЖА: ссылки альтов в сайдбаре
 	// ведут в тот же раздел, что открыт сейчас. Страница настроек
 	// таковой не является, и /characters/{id}/settings отдавал 404.
@@ -622,9 +646,22 @@ func (s *Server) corporations(ec *esi.Client, chars []store.Character) []corpEnt
 	return corps
 }
 
-func (s *Server) render(w http.ResponseWriter, page string, data map[string]any, stale *atomic.Bool) {
-	if stale != nil && stale.Load() {
-		data["Stale"] = true
+func (s *Server) render(w http.ResponseWriter, page string, data map[string]any, view *esi.ViewStatus) {
+	if view != nil {
+		if view.Stale() {
+			data["Stale"] = true
+		}
+		// Refresh failures behind the data shown (a route backing off
+		// after an ESI error) join the page's own error list.
+		if errs := view.Errors(); len(errs) > 0 {
+			existing, _ := data["Errors"].([]string)
+			data["Errors"] = append(existing, errs...)
+		}
+		// What this render read is what the page depends on: the SSE
+		// hub watches it while the page is open and pushes changes.
+		if view.Page != "" {
+			s.events().setDeps(view.Page, view.Deps())
+		}
 	}
 	if err := s.pages[page].ExecuteTemplate(w, "layout.html", data); err != nil {
 		log.Printf("render %s: %v", page, err)

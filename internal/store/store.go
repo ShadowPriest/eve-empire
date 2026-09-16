@@ -178,6 +178,20 @@ CREATE TABLE IF NOT EXISTS account_omega (
 	if err != nil {
 		return err
 	}
+	// ESI Refresher metadata on the cache (esi/refresher.go): whose token
+	// fetched the row, the compatibility-date flag, when it was fetched
+	// (TTL = expires − fetched) and when a page last read it. Rows from
+	// before the columns keep zeros and re-register on their next read.
+	for _, ddl := range []string{
+		`ALTER TABLE esi_cache ADD COLUMN char_id INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE esi_cache ADD COLUMN compat INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE esi_cache ADD COLUMN fetched INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE esi_cache ADD COLUMN last_read INTEGER NOT NULL DEFAULT 0`,
+	} {
+		if _, err := s.db.Exec(ddl); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
 	if err := s.migrateHistory(); err != nil {
 		return err
 	}
@@ -478,6 +492,23 @@ func (s *Store) Setting(key string) string {
 	return v
 }
 
+// SettingsPrefix returns every app setting whose key starts with prefix.
+func (s *Store) SettingsPrefix(prefix string) map[string]string {
+	out := map[string]string{}
+	rows, err := s.db.Query(`SELECT key, value FROM app_settings WHERE key LIKE ? || '%'`, prefix)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k, v string
+		if rows.Scan(&k, &v) == nil {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // SetSetting stores an app setting.
 func (s *Store) SetSetting(key, value string) error {
 	_, err := s.db.Exec(`INSERT INTO app_settings (key, value) VALUES (?, ?)
@@ -523,21 +554,97 @@ func (s *Store) allTags() (map[int64][]string, error) {
 
 // ── ESI response cache (survives restarts) ──────────────────────────
 
-func (s *Store) CacheGet(url string) (body []byte, pages int, expires time.Time, ok bool) {
-	var exp int64
-	err := s.db.QueryRow(`SELECT body, pages, expires FROM esi_cache WHERE url = ?`, url).
-		Scan(&body, &pages, &exp)
-	if err != nil {
-		return nil, 0, time.Time{}, false
-	}
-	return body, pages, time.Unix(exp, 0), true
+// CacheMeta is everything esi_cache knows about a row besides the body.
+type CacheMeta struct {
+	URL      string
+	CharID   int64 // whose token fetched it; 0 = public route
+	Compat   bool  // fetched with X-Compatibility-Date
+	Pages    int
+	Expires  time.Time
+	Fetched  time.Time // zero for rows written before the column existed
+	LastRead time.Time // zero until a page has read it since the column appeared
 }
 
-func (s *Store) CachePut(url string, body []byte, pages int, expires time.Time) {
+func (s *Store) CacheGet(url string) (body []byte, meta CacheMeta, ok bool) {
+	var exp, fetched, compat int64
+	err := s.db.QueryRow(`SELECT body, pages, expires, char_id, compat, fetched FROM esi_cache WHERE url = ?`, url).
+		Scan(&body, &meta.Pages, &exp, &meta.CharID, &compat, &fetched)
+	if err != nil {
+		return nil, CacheMeta{}, false
+	}
+	meta.URL = url
+	meta.Expires = time.Unix(exp, 0)
+	meta.Compat = compat != 0
+	if fetched > 0 {
+		meta.Fetched = time.Unix(fetched, 0)
+	}
+	return body, meta, true
+}
+
+// CachePut stores a response; last_read is left to CacheTouch.
+func (s *Store) CachePut(url string, body []byte, m CacheMeta) {
+	compat := 0
+	if m.Compat {
+		compat = 1
+	}
 	_, _ = s.db.Exec(`
-INSERT INTO esi_cache (url, body, pages, expires) VALUES (?, ?, ?, ?)
-ON CONFLICT(url) DO UPDATE SET body = excluded.body, pages = excluded.pages, expires = excluded.expires`,
-		url, body, pages, expires.Unix())
+INSERT INTO esi_cache (url, body, pages, expires, char_id, compat, fetched) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(url) DO UPDATE SET body = excluded.body, pages = excluded.pages, expires = excluded.expires,
+    char_id = excluded.char_id, compat = excluded.compat, fetched = excluded.fetched`,
+		url, body, m.Pages, m.Expires.Unix(), m.CharID, compat, m.Fetched.Unix())
+}
+
+// CacheRenew extends a row whose body came back unchanged: the deadline
+// moves, the blob stays on disk untouched.
+func (s *Store) CacheRenew(url string, expires, fetched time.Time) {
+	_, _ = s.db.Exec(`UPDATE esi_cache SET expires = ?, fetched = ? WHERE url = ?`,
+		expires.Unix(), fetched.Unix(), url)
+}
+
+// CacheMetas lists every cached URL without its body — the refresher's
+// registry at startup.
+func (s *Store) CacheMetas() []CacheMeta {
+	rows, err := s.db.Query(`SELECT url, pages, expires, char_id, compat, fetched, last_read FROM esi_cache`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []CacheMeta
+	for rows.Next() {
+		var m CacheMeta
+		var exp, fetched, read, compat int64
+		if err := rows.Scan(&m.URL, &m.Pages, &exp, &m.CharID, &compat, &fetched, &read); err != nil {
+			continue
+		}
+		m.Expires = time.Unix(exp, 0)
+		m.Compat = compat != 0
+		if fetched > 0 {
+			m.Fetched = time.Unix(fetched, 0)
+		}
+		if read > 0 {
+			m.LastRead = time.Unix(read, 0)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// CacheTouch records when pages last read the URLs, in one transaction.
+func (s *Store) CacheTouch(reads map[string]time.Time) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`UPDATE esi_cache SET last_read = ? WHERE url = ? AND last_read < ?`)
+	if err != nil {
+		return
+	}
+	defer stmt.Close()
+	for url, at := range reads {
+		_, _ = stmt.Exec(at.Unix(), url, at.Unix())
+	}
+	_ = tx.Commit()
 }
 
 // ── entity name cache ────────────────────────────────────────────────

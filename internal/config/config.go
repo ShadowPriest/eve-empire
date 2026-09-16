@@ -24,6 +24,10 @@ type Config struct {
 	// usually wants it off: two copies polling the same characters double
 	// the ESI traffic for no benefit, since each has its own database.
 	Collector bool
+	// Refresher selects the ESI Refresher mode (esi/refresher.go):
+	// "full" keeps everything ever read warm in the background, "demand"
+	// only fetches what open pages need — the dev copy next to prod.
+	Refresher string
 }
 
 // Load reads .env (if present) and then the environment.
@@ -39,6 +43,7 @@ func Load() (*Config, error) {
 		SDEPath:      getEnv("SDE_PATH", "sde.db"),
 		UserAgent:    getEnv("ESI_USER_AGENT", "eve-empire/0.1"),
 		Collector:    !isOff(getEnv("COLLECTOR", "on")),
+		Refresher:    getEnv("REFRESHER", "full"),
 	}
 
 	if c.ClientID == "" || c.ClientSecret == "" {

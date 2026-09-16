@@ -53,6 +53,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// ESI Refresher держит кэш тёплым, чтобы страницы не ждали сеть
+	// (TASKS.md, «ESI Refresher»). demand — только ручки открытых страниц.
+	mode := esi.ModeFull
+	if cfg.Refresher == "demand" || cfg.Refresher == "off" {
+		mode = esi.ModeDemand
+	}
+	esiClient.Refresher().Start(ctx, mode)
+
 	// Фоновый сбор для учёта ТМЦ: ESI отдаёт кошельки, контракты и работы
 	// скользящим окном и забывает их. Дев-копия обычно ставит COLLECTOR=off,
 	// чтобы две копии не дублировали трафик (ARCHITECTURE.md, «Две копии»).

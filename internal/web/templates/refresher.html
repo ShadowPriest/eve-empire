@@ -1,0 +1,148 @@
+{{define "content"}}
+<h1>ESI Refresher</h1>
+<p class="muted" style="font-size:.82rem; margin:.2rem 0 0; max-width:960px;">
+  Фоновое обновление кэша ESI. Страницы рисуются только из кэша; сеть — здесь.
+  Горячие ручки — те, на которые сейчас смотрит открытая страница, они обновляются
+  ровно по сроку кэша ESI. Тёплые — всё остальное, включая сайдбар: срок × множитель.
+  Множитель 0 — только когда страница попросит. Быстрее срока ESI ходить нельзя:
+  до него CCP отдаёт тот же снимок. Цифры обновляются раз в 5 секунд.
+</p>
+
+<div class="statgrid">
+  <div class="card">
+    <p class="klabel">Ручек в реестре</p>
+    <p class="kval">{{.Snap.Entries}}</p>
+    <p class="knote muted">горячих {{.Snap.Hot}} · тёплых {{.Snap.Warm}} · по запросу {{.Snap.Demand}}
+      {{if .Snap.Failing}}· <span class="sev-warn">с ошибками {{.Snap.Failing}}</span>{{end}}</p>
+  </div>
+  <div class="card">
+    <p class="klabel">Запросов в минуту</p>
+    <p class="kval">{{printf "%.1f" .Snap.PerMin1}}</p>
+    <p class="knote muted">за 10 минут в среднем {{printf "%.1f" .Snap.PerMin10}} · в полёте {{.Snap.Inflight}} из {{.Snap.Workers}}</p>
+  </div>
+  <div class="card">
+    <p class="klabel">Очередь</p>
+    <p class="kval">{{if .Snap.Paused}}<span class="sev-err">пауза</span>{{else}}{{.Snap.Due}} готово{{end}}</p>
+    <p class="knote muted">{{if .Snap.Paused}}{{.Snap.Paused}}{{else}}наблюдают страницы: {{.Snap.Watched}} ручек · режим {{.Snap.Mode}} · работает {{.Uptime}}{{end}}</p>
+  </div>
+  <div class="card">
+    <p class="klabel">Бюджет ошибок ESI</p>
+    <p class="kval">{{if .BudgetSeen}}{{.Snap.Budget.Remain}}{{else}}—{{end}}</p>
+    <p class="knote muted">{{if .BudgetSeen}}из 100, сброс через {{.Snap.Budget.Reset}} с · заголовок {{.BudgetSeen}}{{else}}ещё ни одного ответа ESI{{end}}</p>
+  </div>
+</div>
+
+<div class="card" style="margin-top:1.2rem;">
+  <h2>Виды ручек</h2>
+  <p class="muted" style="font-size:.78rem; margin:0 0 .6rem;">
+    Множитель правится в строке и сохраняется сразу. Клик по строке раскрывает ручки по персонажам.
+    «Без изменений» — доля ответов, тело которых совпало с кэшем: сколько запросов
+    сэкономил бы ETag.
+  </p>
+  <div class="reftbl">
+    <div class="refhead refrow">
+      <span>Вид</span><span>Ручек</span><span>Кэш ESI</span><span>Множитель</span><span>Период</span>
+      <span>Запросов</span><span>Без изменений</span><span>Ошибок</span><span>Средн.</span><span>Последний</span><span>Следующий</span>
+    </div>
+    {{range .Kinds}}
+    <details class="refkind{{if not .Entries}} empty{{end}}" data-kind="{{.Kind.Name}}">
+      <summary class="refrow">
+        <span title="{{.Kind.Name}}">{{.Kind.Title}}</span>
+        <span>{{if .Entries}}{{.Entries}}{{else}}<span class="muted">—</span>{{end}}</span>
+        <span>{{if .TTL}}{{.TTL}}{{else}}<span class="muted">—</span>{{end}}</span>
+        <span>{{if .Kind.Static}}<span class="muted">статично</span>{{else}}<input class="multin" type="number" min="0" max="1000" step="1" value="{{.Mult}}" data-kind="{{.Kind.Name}}" title="0 — только по запросу; 1 — сразу по сроку ESI; N — каждый N-й срок">{{end}}</span>
+        <span>{{.Period}}</span>
+        <span>{{if .Fetches}}{{.Fetches}}{{else}}<span class="muted">—</span>{{end}}</span>
+        <span>{{if .Fetches}}{{.UnchangedPct}}%{{else}}<span class="muted">—</span>{{end}}</span>
+        <span>{{if .Errors}}<span class="sev-warn">{{.Errors}}</span>{{else if .Fetches}}0{{else}}<span class="muted">—</span>{{end}}</span>
+        <span>{{if .Fetches}}{{.AvgMs}} мс{{else}}<span class="muted">—</span>{{end}}</span>
+        <span>{{if .LastFetch}}{{.LastFetch}}{{else}}<span class="muted">—</span>{{end}}</span>
+        <span>{{if .NextDue}}{{.NextDue}}{{else}}<span class="muted">—</span>{{end}}</span>
+      </summary>
+      {{if .Rows}}
+      <table class="refentries">
+        <thead><tr><th>Персонаж</th><th>Маршрут</th><th>Уровень</th><th>Срок ESI</th><th>Обновление</th><th>Ошибки</th></tr></thead>
+        <tbody>
+        {{range .Rows}}
+        <tr{{if .Failures}} class="failing"{{end}}>
+          <td>{{if .Who}}{{.Who}}{{else}}<span class="muted">—</span>{{end}}</td>
+          <td class="mono">{{.Path}}</td>
+          <td>{{if eq .Tier "hot"}}<b>горячая</b>{{else if eq .Tier "warm"}}тёплая{{else}}<span class="muted">по запросу</span>{{end}}{{if .Inflight}} · <i>в полёте</i>{{end}}</td>
+          <td>{{if .Expires}}{{.Expires}}{{else}}<span class="muted">нет кэша</span>{{end}}</td>
+          <td>{{if .Due}}{{.Due}}{{else}}<span class="muted">—</span>{{end}}</td>
+          <td>{{if .Failures}}<span class="sev-warn" title="{{.LastErr}}">{{.Failures}}× {{.LastErr}}</span>{{end}}</td>
+        </tr>
+        {{end}}
+        </tbody>
+      </table>
+      {{else if .Kind.Static}}<p class="muted" style="font-size:.78rem; margin:.3rem 0 .5rem 1rem;">Статичные данные: докачиваются, если их нет, и больше не трогаются.</p>
+      {{else}}<p class="muted" style="font-size:.78rem; margin:.3rem 0 .5rem 1rem;">Ни одной ручки этого вида ещё не читали.</p>{{end}}
+    </details>
+    {{end}}
+  </div>
+</div>
+
+<div class="card" style="margin-top:1.2rem; max-width:960px;">
+  <h2>Фоновые задачи учёта</h2>
+  {{if .Tasks}}
+  <table>
+    <thead><tr><th>Задача</th><th>Интервал</th><th>Последний запуск</th><th>Последний успех</th><th>Заметка</th></tr></thead>
+    <tbody>
+    {{range .Tasks}}
+    <tr>
+      <td>{{.Task}}</td>
+      <td>{{if .Every}}{{.Every}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{if .LastTry}}{{.LastTry}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{if .Stale}}<span class="sev-warn">{{.LastOK}}</span>{{else if .LastOK}}{{.LastOK}}{{else}}<span class="muted">ещё не было</span>{{end}}</td>
+      <td class="muted" style="font-size:.78rem;">{{.Note}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}<p class="muted">Сбор выключен (COLLECTOR=off) или ещё не запускался.</p>{{end}}
+</div>
+
+<script>
+/* Панель живёт: раз в 5 с страница перезапрашивается и подменяются
+   только изменившиеся блоки (eeLive.applyFresh). Раскрытые виды
+   запоминаются, иначе подмена их схлопывала бы. Слушатели вешаются
+   один раз на документ — страницу можно открывать и закрывать. */
+(() => {
+  if (!window.__refPanel) {
+    window.__refPanel = {open: new Set(JSON.parse(localStorage.getItem('refOpen') || '[]'))};
+    document.addEventListener('toggle', e => {
+      const d = e.target;
+      if (!(d instanceof HTMLDetailsElement) || !d.classList.contains('refkind')) return;
+      if (d.open) __refPanel.open.add(d.dataset.kind); else __refPanel.open.delete(d.dataset.kind);
+      localStorage.setItem('refOpen', JSON.stringify([...__refPanel.open]));
+    }, true);
+    document.addEventListener('change', e => {
+      const inp = e.target;
+      if (!inp.classList || !inp.classList.contains('multin')) return;
+      const body = new URLSearchParams({kind: inp.dataset.kind, mult: inp.value});
+      fetch('/api/refresher/mult', {method: 'POST', body})
+        .then(r => r.json())
+        .then(j => { if (j.error) alert(j.error); else inp.value = j.mult; inp.blur(); })
+        .catch(() => alert('Не удалось сохранить множитель'));
+    });
+    document.addEventListener('page:swap', () => {
+      document.querySelectorAll('details.refkind').forEach(d => {
+        if (__refPanel.open.has(d.dataset.kind)) d.open = true;
+      });
+    });
+  }
+  document.querySelectorAll('details.refkind').forEach(d => {
+    if (__refPanel.open.has(d.dataset.kind)) d.open = true;
+  });
+  const path = location.pathname;
+  if (__refPanel.timer) clearInterval(__refPanel.timer);
+  __refPanel.timer = setInterval(() => {
+    if (location.pathname !== path) { clearInterval(__refPanel.timer); __refPanel.timer = null; return; }
+    if (!window.eeLive) return;
+    fetch(location.href).then(r => r.text())
+      .then(html => eeLive.applyFresh(new DOMParser().parseFromString(html, 'text/html')))
+      .catch(() => {});
+  }, 5000);
+})();
+</script>
+{{end}}
