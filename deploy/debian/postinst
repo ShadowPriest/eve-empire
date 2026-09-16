@@ -1,0 +1,40 @@
+#!/bin/sh
+# postinst: пользователь службы, права на данные и настройки, systemd.
+set -e
+
+case "$1" in
+    configure)
+        if ! getent group eve-empire >/dev/null; then
+            groupadd --system eve-empire
+        fi
+        if ! getent passwd eve-empire >/dev/null; then
+            useradd --system --gid eve-empire --home-dir /var/lib/eve-empire \
+                --shell /usr/sbin/nologin --comment "EVE Empire service" eve-empire
+        fi
+
+        # Базы: рабочая с токенами и sde.db. Только сервису.
+        chown eve-empire:eve-empire /var/lib/eve-empire
+        chmod 0750 /var/lib/eve-empire
+
+        # Настройки содержат client secret и ключ шифрования токенов:
+        # читать может root и группа службы, остальным нельзя.
+        chown root:eve-empire /etc/eve-empire/eve-empire.env
+        chmod 0640 /etc/eve-empire/eve-empire.env
+
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+            # Первая установка: не стартуем, без EVE_CLIENT_ID сервер сразу
+            # падает. Обновление: перезапускаем только если уже работал.
+            if [ -z "$2" ]; then
+                systemctl enable eve-empire.service >/dev/null 2>&1 || true
+                echo "eve-empire: впиши EVE_CLIENT_ID, EVE_CLIENT_SECRET и ENCRYPTION_KEY в"
+                echo "  /etc/eve-empire/eve-empire.env, затем: systemctl start eve-empire"
+                echo "  Подробности: /usr/share/doc/eve-empire/SETUP.md"
+            else
+                systemctl try-restart eve-empire.service >/dev/null 2>&1 || true
+            fi
+        fi
+        ;;
+esac
+
+exit 0

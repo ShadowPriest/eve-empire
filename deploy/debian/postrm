@@ -1,0 +1,27 @@
+#!/bin/sh
+# postrm: remove оставляет базы и настройки (там токены альтов и ключ,
+# которым они зашифрованы; потерять их значит перелогинивать всех).
+# purge сносит всё вместе с пользователем службы.
+set -e
+
+case "$1" in
+    remove)
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        ;;
+    purge)
+        rm -rf /var/lib/eve-empire /etc/eve-empire
+        if getent passwd eve-empire >/dev/null; then
+            userdel eve-empire >/dev/null 2>&1 || true
+        fi
+        if getent group eve-empire >/dev/null; then
+            groupdel eve-empire >/dev/null 2>&1 || true
+        fi
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,3 @@
+# Скрипты и unit для deb выполняются на Linux: CRLF ломает «#!/bin/sh».
+# cmd/mkdeb нормализует их сам, но пусть и checkout будет правильным.
+deploy/debian/* text eol=lf

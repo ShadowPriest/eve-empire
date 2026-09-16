@@ -1,0 +1,15 @@
+Package: eve-empire
+Version: ${VERSION}
+Section: web
+Priority: optional
+Architecture: ${ARCH}
+Installed-Size: ${SIZE}
+Depends: ca-certificates
+Recommends: systemd
+Maintainer: Evgeniy Semenov <eve-empire@users.noreply.github.com>
+Homepage: https://github.com/ShadowPriest/eve-empire
+Description: personal cabinet for EVE Online alts via ESI
+ Single static binary plus SQLite. Runs as a systemd service under the
+ eve-empire user, listens on :8080, keeps its databases in
+ /var/lib/eve-empire and reads EVE SSO credentials from
+ /etc/eve-empire/eve-empire.env.

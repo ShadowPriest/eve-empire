@@ -1,0 +1,15 @@
+#!/bin/sh
+# prerm: при удалении останавливаем службу; при обновлении не трогаем,
+# postinst сделает try-restart уже на новом бинарнике.
+set -e
+
+case "$1" in
+    remove)
+        if [ -d /run/systemd/system ]; then
+            systemctl stop eve-empire.service >/dev/null 2>&1 || true
+            systemctl disable eve-empire.service >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+
+exit 0

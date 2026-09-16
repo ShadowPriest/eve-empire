@@ -1,0 +1,32 @@
+[Unit]
+Description=EVE Empire - personal cabinet for EVE Online alts
+Documentation=https://github.com/ShadowPriest/eve-empire
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=eve-empire
+Group=eve-empire
+EnvironmentFile=/etc/eve-empire/eve-empire.env
+WorkingDirectory=/var/lib/eve-empire
+ExecStart=/usr/bin/eve-empire
+Restart=on-failure
+RestartSec=5s
+# Как Ctrl+C в main.go: SIGTERM, graceful shutdown до 10 с.
+KillSignal=SIGTERM
+TimeoutStopSec=15s
+
+# Сервису нужна только своя папка с базами и сеть наружу.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/eve-empire
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -4,6 +4,7 @@
 *.db
 *.db-wal
 *.db-shm
+*.db.bak-*
 
 # личные файлы владельца, не имеющие отношения к коду
 ROS config.txt
@@ -20,3 +21,4 @@ skill-plan*.txt
 /dist/
 *.exe~
 *~
+/dist-windows/
