@@ -106,6 +106,11 @@ var defaultScopes = []string{
 	// структуры: имена цитаделей и корпоративный список
 	"esi-universe.read_structures.v1",     // /universe/structures/{id}/
 	"esi-corporations.read_structures.v1", // /corporations/{id}/structures/
+	// поиск цитадели по имени для прокладки маршрута: /universe/ids/ игрокских
+	// структур не знает в принципе, их видит только авторизованный поиск (ACL).
+	// ГРАБЛЯ: у старых токенов права нет — до перелогина маршрут ляжет только
+	// до системы; хватает одного перелогиненного пилота среди выбранных.
+	"esi-search.search_structures.v1", // /characters/{id}/search/?categories=structure
 
 	// корпорация
 	"esi-corporations.read_divisions.v1",      // /divisions/

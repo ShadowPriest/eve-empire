@@ -1301,9 +1301,10 @@ func CleanPastedName(s string) string {
 	return strings.TrimSpace(strings.TrimRight(strings.TrimSpace(s), "* \t\u00a0"))
 }
 
-// ResolveDestination turns a pasted destination — a solar system or an NPC
-// station, copied from a client in any language — into an id SetWaypoint
-// accepts, plus the canonical name of what was actually resolved.
+// ResolveDestination turns a pasted destination — a solar system, an NPC
+// station or a player structure, copied from a client in any language —
+// into an id SetWaypoint accepts, plus the canonical name of what was
+// actually resolved.
 //
 // /universe/ids/ only knows English names, so a station pasted from a
 // localized client ("Pator V (Vakir) - Центр снабжения Republic Fleet")
@@ -1311,13 +1312,21 @@ func CleanPastedName(s string) string {
 // are the same in every locale, which pins the system and narrows its
 // station list; corp names in the localized tail keep their Latin words
 // ("Republic Fleet"), which breaks ties between stations sharing a planet.
-func (c *Client) ResolveDestination(raw string) (int64, string, error) {
+//
+// Player structures ("Dantbeinn - Horizon Engineering Center") never
+// resolve publicly at all — visibility is per-character ACL — so they go
+// through the authenticated search of the very pilots getting the route
+// (searchers); one of them seeing the citadel is enough for everyone.
+func (c *Client) ResolveDestination(raw string, searchers []int64) (int64, string, error) {
 	name := CleanPastedName(raw)
 	if name == "" {
 		return 0, "", fmt.Errorf("пустое название")
 	}
 	if id, _ := c.lookupExact(name); id != 0 {
 		return id, name, nil // exact hit, English or plain system name
+	}
+	if id := c.searchStructure(name, searchers); id != 0 {
+		return id, name, nil
 	}
 	seg := strings.Split(name, " - ")
 	if len(seg) < 2 {
@@ -1360,6 +1369,32 @@ func (c *Client) ResolveDestination(raw string) (int64, string, error) {
 	}
 	// The place parsed but no station matched: route to the system at least.
 	return sysID, sysName + " (станция не опознана, маршрут до системы)", nil
+}
+
+// searchStructure looks a player structure up by its exact name through
+// the characters' authenticated search (esi-search.search_structures.v1).
+// Tokens issued before that scope was added just error out — skip and try
+// the next pilot; ACLs also differ per character, so an empty result from
+// one is not the final word. Capped so a garbage paste against a large
+// selection doesn't turn into a request storm.
+func (c *Client) searchStructure(name string, searchers []int64) int64 {
+	for i, id := range searchers {
+		if i >= 8 {
+			break
+		}
+		var out struct {
+			Structure []int64 `json:"structure"`
+		}
+		path := fmt.Sprintf("/characters/%d/search/?categories=structure&strict=true&search=%s",
+			id, url.QueryEscape(name))
+		if _, err := c.get(id, path, &out); err != nil {
+			continue // most likely an old token without the search scope
+		}
+		if len(out.Structure) > 0 {
+			return out.Structure[0]
+		}
+	}
+	return 0
 }
 
 // lookupExact asks /universe/ids/ for the name and takes a system or an

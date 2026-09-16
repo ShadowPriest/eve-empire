@@ -5330,7 +5330,7 @@ func (s *Server) handleBulkWaypoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	destID, resolved, err := s.ESI.ResolveDestination(req.System)
+	destID, resolved, err := s.ESI.ResolveDestination(req.System, req.IDs)
 	if err != nil {
 		writeJSON(w, map[string]any{"error": err.Error()})
 		return

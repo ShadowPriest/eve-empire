@@ -1496,6 +1496,8 @@
   /* drag target highlight when moving a bookmark between folders */
   .rfold.dropover > .rfhead { background: #1a2438; outline: 1px dashed #4da3ff; }
   .rsys.dragging { opacity: .45; }
+  /* …or dropping it on a pilot to route just them */
+  .routelist label.dropover { background: #1a2438; outline: 1px dashed #4da3ff; }
   /* quick-destination tree */
   .rtree { flex: 1; overflow-y: auto; margin-top: .4rem; font-size: .85rem; }
   .rtree button { background: none; border: none; padding: 0 .25rem; font-size: .85rem;
@@ -3492,7 +3494,7 @@
       return;
     }
     el.innerHTML = routeRecents.map(rc =>
-      '<div class="rsys rrec" data-sys="' + rEsc(rc.system) + '">' +
+      '<div class="rsys rrec" draggable="true" data-sys="' + rEsc(rc.system) + '">' +
         '<button type="button" class="rs-go" title="заменить маршрут выбранным">➤</button>' +
         '<button type="button" class="rs-add" title="добавить точкой, не меняя маршрут">+</button>' +
         '<span class="rsname" title="подставить в поле назначения">' + rEsc(rc.system) + '</span>' +
@@ -3723,8 +3725,9 @@
     });
     return fails;
   }
-  function sendRoute(system, clear, treeBtn) {
-    const ids = [...modal.querySelectorAll('.routelist input:checked')].map(cb => Number(cb.dataset.id));
+  function sendRoute(system, clear, treeBtn, onlyIDs) {
+    const ids = onlyIDs ||
+      [...modal.querySelectorAll('.routelist input:checked')].map(cb => Number(cb.dataset.id));
     if (!ids.length) { alert('Никто не выбран.'); return; }
     const go = document.getElementById('routego');
     const glyph = treeBtn ? treeBtn.textContent : ''; // ➤ or + — restore after
@@ -3818,40 +3821,58 @@
     }
   });
 
-  /* ── dragging a bookmark between folders ────────────────── */
+  /* ── dragging a bookmark: between folders, or onto a pilot ──
+     Dropped on a pilot row, the route goes to that character alone,
+     checkboxes untouched. Recent places drag the same way (but only
+     folder bookmarks can be re-filed). */
   let rDragMark = null;
+  function clearDropHints() {
+    modal.querySelectorAll('.rfold.dropover').forEach(f => f.classList.remove('dropover'));
+    modal.querySelectorAll('.routelist label.dropover').forEach(l => l.classList.remove('dropover'));
+  }
   modal.addEventListener('dragstart', e => {
-    const row = e.target.closest('.rsys:not(.rrec)');
+    const row = e.target.closest('.rsys');
     if (!row) return;
-    rDragMark = {fi: Number(row.dataset.fi), si: Number(row.dataset.si)};
+    rDragMark = row.classList.contains('rrec')
+      ? {system: row.dataset.sys}
+      : {fi: Number(row.dataset.fi), si: Number(row.dataset.si),
+         system: routeTree[Number(row.dataset.fi)].systems[Number(row.dataset.si)]};
     row.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
   });
   modal.addEventListener('dragover', e => {
     if (!rDragMark) return;
+    clearDropHints();
     const fold = e.target.closest('.rfold');
-    modal.querySelectorAll('.rfold.dropover').forEach(f => f.classList.remove('dropover'));
-    if (fold && Number(fold.dataset.fi) !== rDragMark.fi) {
+    const pilot = e.target.closest('.routelist label');
+    if (fold && rDragMark.fi !== undefined && Number(fold.dataset.fi) !== rDragMark.fi) {
       e.preventDefault();
       fold.classList.add('dropover');
+    } else if (pilot) {
+      e.preventDefault();
+      pilot.classList.add('dropover');
     }
   });
   modal.addEventListener('drop', e => {
     if (!rDragMark) return;
     e.preventDefault();
     const fold = e.target.closest('.rfold');
-    if (fold && Number(fold.dataset.fi) !== rDragMark.fi) {
+    const pilot = e.target.closest('.routelist label');
+    if (fold && rDragMark.fi !== undefined && Number(fold.dataset.fi) !== rDragMark.fi) {
       const to = Number(fold.dataset.fi);
       const [sys] = routeTree[rDragMark.fi].systems.splice(rDragMark.si, 1);
       if (!routeTree[to].systems.includes(sys)) routeTree[to].systems.push(sys);
       routeTree[to].open = true;
       saveRouteTree();
       renderRouteTree();
+    } else if (pilot) {
+      sendRoute(rDragMark.system, true, null,
+        [Number(pilot.querySelector('input').dataset.id)]);
     }
   });
   modal.addEventListener('dragend', () => {
     rDragMark = null;
-    modal.querySelectorAll('.rfold.dropover').forEach(f => f.classList.remove('dropover'));
+    clearDropHints();
     modal.querySelectorAll('.rsys.dragging').forEach(r => r.classList.remove('dragging'));
   });
 
