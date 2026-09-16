@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS spfarm_price (
     PRIMARY KEY (type_id, at)
 );
 CREATE TABLE IF NOT EXISTS plex_purchase (
-    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 0,
     day   TEXT    NOT NULL, -- YYYY-MM-DD
     qty   INTEGER NOT NULL, -- PLEX
     price REAL    NOT NULL, -- ISK за штуку
@@ -36,7 +37,9 @@ CREATE TABLE IF NOT EXISTS plex_purchase (
 -- скорость персонажа идёт в прогноз, только когда тренируемый навык из
 -- пула (пустой пул = любой навык).
 CREATE TABLE IF NOT EXISTS spfarm_account (
-    account TEXT PRIMARY KEY
+    user_id INTEGER NOT NULL DEFAULT 0,
+    account TEXT NOT NULL,
+    PRIMARY KEY (user_id, account)
 );
 CREATE TABLE IF NOT EXISTS spfarm_char (
     character_id INTEGER PRIMARY KEY,
@@ -45,7 +48,8 @@ CREATE TABLE IF NOT EXISTS spfarm_char (
 -- Предложения магазина EVE: цена в PLEX и длительность в месяцах —
 -- годовая модель пересчитывает любое предложение в PLEX/год.
 CREATE TABLE IF NOT EXISTS spfarm_offer (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 0,
     name   TEXT    NOT NULL,
     plex   REAL    NOT NULL,
     months INTEGER NOT NULL DEFAULT 12
@@ -53,7 +57,8 @@ CREATE TABLE IF NOT EXISTS spfarm_offer (
 -- Заготовленные планы прокачки для пулов навыков фермы: именованный
 -- текст в том же формате, что и сам пул (игровой буфер или по строке).
 CREATE TABLE IF NOT EXISTS spfarm_plan (
-    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL DEFAULT 0,
     name TEXT NOT NULL,
     body TEXT NOT NULL
 )`)
@@ -68,8 +73,8 @@ type FarmPlan struct {
 	Body string
 }
 
-func (s *Store) FarmPlans() ([]FarmPlan, error) {
-	rows, err := s.db.Query(`SELECT id, name, body FROM spfarm_plan ORDER BY name`)
+func (s *Store) FarmPlans(userID int64) ([]FarmPlan, error) {
+	rows, err := s.db.Query(`SELECT id, name, body FROM spfarm_plan WHERE user_id = ? ORDER BY name`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -85,24 +90,24 @@ func (s *Store) FarmPlans() ([]FarmPlan, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) AddFarmPlan(name, body string) (int64, error) {
-	res, err := s.db.Exec(`INSERT INTO spfarm_plan (name, body) VALUES (?, ?)`, name, body)
+func (s *Store) AddFarmPlan(userID int64, name, body string) (int64, error) {
+	res, err := s.db.Exec(`INSERT INTO spfarm_plan (user_id, name, body) VALUES (?, ?, ?)`, userID, name, body)
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
-func (s *Store) DeleteFarmPlan(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM spfarm_plan WHERE id = ?`, id)
+func (s *Store) DeleteFarmPlan(userID, id int64) error {
+	_, err := s.db.Exec(`DELETE FROM spfarm_plan WHERE id = ? AND user_id = ?`, id, userID)
 	return err
 }
 
 // ── ростер фермы ─────────────────────────────────────────────────────
 
 // FarmAccounts returns the account labels enrolled in the farm.
-func (s *Store) FarmAccounts() (map[string]bool, error) {
-	rows, err := s.db.Query(`SELECT account FROM spfarm_account`)
+func (s *Store) FarmAccounts(userID int64) (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT account FROM spfarm_account WHERE user_id = ?`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -118,9 +123,13 @@ func (s *Store) FarmAccounts() (map[string]bool, error) {
 	return out, rows.Err()
 }
 
-// FarmChars returns farm characters with their skill pools.
-func (s *Store) FarmChars() (map[int64]string, error) {
-	rows, err := s.db.Query(`SELECT character_id, skill_pool FROM spfarm_char`)
+// FarmChars returns the cabinet's farm characters with their skill
+// pools. У spfarm_char нет своего user_id — ключ таблицы персонаж, а
+// владелец персонажа известен из characters, поэтому фильтр идёт JOIN'ом.
+func (s *Store) FarmChars(userID int64) (map[int64]string, error) {
+	rows, err := s.db.Query(`SELECT f.character_id, f.skill_pool FROM spfarm_char f
+		JOIN characters c ON c.character_id = f.character_id
+		WHERE c.user_id = ?`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -139,26 +148,31 @@ func (s *Store) FarmChars() (map[int64]string, error) {
 
 // SetFarmRoster replaces the whole roster in one transaction — the
 // settings form always submits the full picture.
-func (s *Store) SetFarmRoster(accounts []string, chars map[int64]string) error {
+func (s *Store) SetFarmRoster(userID int64, accounts []string, chars map[int64]string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM spfarm_account`); err != nil {
+	if _, err := tx.Exec(`DELETE FROM spfarm_account WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
 	for _, a := range accounts {
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO spfarm_account (account) VALUES (?)`, a); err != nil {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO spfarm_account (user_id, account) VALUES (?, ?)`,
+			userID, a); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`DELETE FROM spfarm_char`); err != nil {
+	// Чистим только своих: таблица общая на инстанс, чужой ростер
+	// форма этого кабинета не описывает и стирать его не должна.
+	if _, err := tx.Exec(`DELETE FROM spfarm_char WHERE character_id IN
+		(SELECT character_id FROM characters WHERE user_id = ?)`, userID); err != nil {
 		return err
 	}
 	for id, pool := range chars {
-		if _, err := tx.Exec(`INSERT INTO spfarm_char (character_id, skill_pool) VALUES (?, ?)`,
-			id, pool); err != nil {
+		if _, err := tx.Exec(`INSERT INTO spfarm_char (character_id, skill_pool)
+			SELECT ?, ? FROM characters WHERE character_id = ? AND user_id = ?`,
+			id, pool, id, userID); err != nil {
 			return err
 		}
 	}
@@ -182,8 +196,8 @@ func (o FarmOffer) PlexPerYear() float64 {
 	return o.Plex * 12 / float64(o.Months)
 }
 
-func (s *Store) FarmOffers() ([]FarmOffer, error) {
-	rows, err := s.db.Query(`SELECT id, name, plex, months FROM spfarm_offer ORDER BY id`)
+func (s *Store) FarmOffers(userID int64) ([]FarmOffer, error) {
+	rows, err := s.db.Query(`SELECT id, name, plex, months FROM spfarm_offer WHERE user_id = ? ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -199,21 +213,21 @@ func (s *Store) FarmOffers() ([]FarmOffer, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) FarmOffer(id int64) (FarmOffer, error) {
+func (s *Store) FarmOffer(userID, id int64) (FarmOffer, error) {
 	var o FarmOffer
-	err := s.db.QueryRow(`SELECT id, name, plex, months FROM spfarm_offer WHERE id = ?`, id).
+	err := s.db.QueryRow(`SELECT id, name, plex, months FROM spfarm_offer WHERE id = ? AND user_id = ?`, id, userID).
 		Scan(&o.ID, &o.Name, &o.Plex, &o.Months)
 	return o, err
 }
 
-func (s *Store) AddFarmOffer(o FarmOffer) error {
-	_, err := s.db.Exec(`INSERT INTO spfarm_offer (name, plex, months) VALUES (?,?,?)`,
-		o.Name, o.Plex, o.Months)
+func (s *Store) AddFarmOffer(userID int64, o FarmOffer) error {
+	_, err := s.db.Exec(`INSERT INTO spfarm_offer (user_id, name, plex, months) VALUES (?,?,?,?)`,
+		userID, o.Name, o.Plex, o.Months)
 	return err
 }
 
-func (s *Store) DeleteFarmOffer(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM spfarm_offer WHERE id = ?`, id)
+func (s *Store) DeleteFarmOffer(userID, id int64) error {
+	_, err := s.db.Exec(`DELETE FROM spfarm_offer WHERE id = ? AND user_id = ?`, id, userID)
 	return err
 }
 
@@ -291,21 +305,21 @@ type PlexPurchase struct {
 	Note  string
 }
 
-func (s *Store) AddPlexPurchase(p PlexPurchase) error {
-	_, err := s.db.Exec(`INSERT INTO plex_purchase (day, qty, price, note)
-		VALUES (?,?,?,?)`, p.Day, p.Qty, p.Price, p.Note)
+func (s *Store) AddPlexPurchase(userID int64, p PlexPurchase) error {
+	_, err := s.db.Exec(`INSERT INTO plex_purchase (user_id, day, qty, price, note)
+		VALUES (?,?,?,?,?)`, userID, p.Day, p.Qty, p.Price, p.Note)
 	return err
 }
 
-func (s *Store) DeletePlexPurchase(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM plex_purchase WHERE id = ?`, id)
+func (s *Store) DeletePlexPurchase(userID, id int64) error {
+	_, err := s.db.Exec(`DELETE FROM plex_purchase WHERE id = ? AND user_id = ?`, id, userID)
 	return err
 }
 
 // PlexPurchases returns the log, newest first.
-func (s *Store) PlexPurchases() ([]PlexPurchase, error) {
+func (s *Store) PlexPurchases(userID int64) ([]PlexPurchase, error) {
 	rows, err := s.db.Query(`SELECT id, day, qty, price, note
-		FROM plex_purchase ORDER BY day DESC, id DESC`)
+		FROM plex_purchase WHERE user_id = ? ORDER BY day DESC, id DESC`, userID)
 	if err != nil {
 		return nil, err
 	}

@@ -17,7 +17,7 @@ import "net/http"
 type reauthRow struct {
 	ID    int64
 	Name  string
-	State string // ok | foreign | unknown
+	State string // ok | foreign | unknown | narrow
 }
 
 // reauthGroup collects the rows of one account, in sidebar order.
@@ -29,12 +29,12 @@ type reauthGroup struct {
 
 func (s *Server) handleReauth(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "reauth")
+	data, _, err := s.shell(r, ec, 0, "reauth")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	chars, err := s.Store.Characters()
+	chars, err := s.Store.Characters(userFrom(r).ID)
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
@@ -45,18 +45,27 @@ func (s *Server) handleReauth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Полный набор — эталон, с которым сравниваются токены.
+	_, full := s.presetScopes(presetAlt)
+
 	var groups []reauthGroup
 	idx := map[string]int{}
 	todo := 0
 	for _, ch := range chars {
 		row := reauthRow{ID: ch.ID, Name: ch.Name}
 		switch client := clients[ch.ID]; {
-		case client == s.SSO.ClientID:
-			row.State = "ok"
+		case client != "" && client != s.SSO.ClientID:
+			row.State = "foreign"
 		case client == "":
 			row.State = "unknown"
+		// Токен свой, но неполный (вход по пресету «Производство» или
+		// старый, до появления нового права): часть кабинета ему
+		// недоступна, и в списке «кого перелогинить» он тоже числится.
+		// Лишние права сверх набора — не повод: они не мешают.
+		case !coversScopes(ch.Scopes, full):
+			row.State = "narrow"
 		default:
-			row.State = "foreign"
+			row.State = "ok"
 		}
 		if row.State != "ok" {
 			todo++

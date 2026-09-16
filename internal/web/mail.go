@@ -356,6 +356,12 @@ func scanMailingList(ec *esi.Client, charID, listID, cursor int64) ([]esi.MailHe
 func (s *Server) handleMailJSON(w http.ResponseWriter, r *http.Request) {
 	charID, err1 := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	mailID, err2 := strconv.ParseInt(r.PathValue("mail"), 10, 64)
+	// Ручка мимо shellFor: владение проверяется здесь. 404, а не 403 —
+	// чужой персонаж не должен даже подтверждаться.
+	if err1 == nil && !s.ownsCharacter(r, charID) {
+		http.NotFound(w, r)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err1 != nil || err2 != nil {
 		json.NewEncoder(w).Encode(map[string]string{"error": "bad id"})

@@ -43,7 +43,13 @@ type Server struct {
 	ESI   *esi.Client
 	Store *store.Store
 	SDE   *sde.DB
+	Auth  AuthConfig
 	pages map[string]*template.Template
+	// login — страница входа, единственный шаблон без layout: сайдбар
+	// строится по персонажам кабинета, а его на входе ещё нет.
+	login *template.Template
+	// touch прореживает отметки «сессией пользуются» (auth.go).
+	touch sessionTouch
 
 	// Last seen system per character, for the route modal's "recent
 	// places": a change since the previous /routes/track poll means the
@@ -56,7 +62,7 @@ type Server struct {
 	hub     *hub
 }
 
-func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *sde.DB) (*Server, error) {
+func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *sde.DB, auth AuthConfig) (*Server, error) {
 	funcs := template.FuncMap{
 		"isk":   formatISK,
 		"num":   formatNum,
@@ -272,7 +278,7 @@ func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *s
 		"empire_planets", "empire_wallets", "empire_training", "empire_industry", "fleet",
 		"mining", "ore", "market_watch", "build", "orders", "mail", "empire_structures",
 		"reauth", "accounting", "spfarm", "spfarm_model", "plex_vault", "empire_air",
-		"refresher",
+		"refresher", "noscope", "corp",
 	} {
 		t, err := template.Must(layout.Clone()).ParseFS(templateFS, "templates/"+name+".html")
 		if err != nil {
@@ -280,7 +286,12 @@ func New(ssoClient *sso.Client, esiClient *esi.Client, st *store.Store, sdeDB *s
 		}
 		pages[name] = t
 	}
-	return &Server{SSO: ssoClient, ESI: esiClient, Store: st, SDE: sdeDB, pages: pages}, nil
+	login, err := template.New("").Funcs(funcs).ParseFS(templateFS, "templates/login.html")
+	if err != nil {
+		return nil, err
+	}
+	return &Server{SSO: ssoClient, ESI: esiClient, Store: st, SDE: sdeDB, Auth: auth,
+		pages: pages, login: login}, nil
 }
 
 func (s *Server) Routes() http.Handler {
@@ -335,6 +346,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /tools/planetary/refineries", s.handlePIRefineries)
 	mux.HandleFunc("GET /login", s.handleLogin)
 	mux.HandleFunc("GET /callback", s.handleCallback)
+	mux.HandleFunc("POST /logout", s.handleLogout)
 	mux.HandleFunc("GET /characters/{id}", s.handleOverview)
 	mux.HandleFunc("GET /characters/{id}/skills", s.handleSkills)
 	mux.HandleFunc("GET /characters/{id}/wallet", s.handleWallet)
@@ -351,6 +363,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /accounts/rename", s.handleRenameAccount)
 	mux.HandleFunc("POST /characters/{id}/tags", s.handleSetTags)
 	mux.HandleFunc("POST /characters/{id}/delete", s.handleDelete)
+	mux.HandleFunc("POST /characters/{id}/share", s.handleSetShare)
+	mux.HandleFunc("GET /corp", s.handleCorp)
 	mux.HandleFunc("GET /corporations/{id}/info", s.handleCorpInfo)
 	mux.HandleFunc("GET /corporations/{id}/projects", s.handleCorpProjects)
 	mux.HandleFunc("GET /corporations/{id}/industry", s.handleCorpIndustry)
@@ -369,13 +383,19 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /routes/tree", s.handleRouteTreeGet)
 	mux.HandleFunc("POST /routes/tree", s.handleRouteTreeSave)
 	mux.HandleFunc("POST /routes/track", s.handleRouteTrack)
-	return mux
+	// Стена входа и проверка Origin — одним слоем вокруг всего mux
+	// (auth.go): забыть её на новом роуте невозможно.
+	return s.withAuth(mux)
 }
 
 // handleRefresher exposes the ESI Refresher registry as JSON — the raw
 // feed for the panel (TASKS.md, «ESI Refresher», stage 3) and a way to
 // see what is hot, due or failing until then. ?filter=hot|failing|due.
 func (s *Server) handleRefresher(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		http.NotFound(w, r)
+		return
+	}
 	reg := s.ESI.Refresher()
 	writeJSON(w, map[string]any{
 		"summary": reg.Snapshot(),
@@ -388,9 +408,16 @@ func (s *Server) handleRefresher(w http.ResponseWriter, r *http.Request) {
 // Refresher fetches what the read marked hot, and the page polls (later:
 // listens) for the fresher render. Live data (fleet, market depth) and
 // POST actions keep using s.ESI directly.
+// Язык ESI — настройка кабинета, а не инстанса: он уезжает в URL
+// (?language=ru), то есть в ключ кэша, поэтому разные кабинеты просто
+// читают разные записи, а ESI Refresher обновляет любой URL как есть.
 func (s *Server) esiFor(r *http.Request) (*esi.Client, *esi.ViewStatus) {
 	ec, view := s.ESI.StaleView()
 	view.Page = r.URL.RequestURI()
+	if u := userFrom(r); u != nil {
+		view.UserID = u.ID
+		ec = ec.WithLanguage(s.Store.UserSetting(u.ID, "language"))
+	}
 	return ec, view
 }
 
@@ -432,34 +459,54 @@ func (s *Server) sideInfo(ec *esi.Client, ch store.Character) sideChar {
 	var jobs []esi.IndustryJob
 	var sheet *esi.SkillSheet
 	var queue []esi.QueueEntry
+	// Узкий токен (пресет «Производство») половины этих прав не имеет:
+	// спрашивать ESI бессмысленно — поле карточки просто остаётся
+	// пустым (scopes.go).
 	wg.Add(6)
 	go func() {
 		defer wg.Done()
-		sc.Wallet, _ = ec.WalletBalance(ch.ID)
+		if ch.Has(scopeWallet) {
+			sc.Wallet, _ = ec.WalletBalance(ch.ID)
+		}
 	}()
 	go func() {
 		defer wg.Done()
+		if !ch.Has(scopeMail) {
+			return
+		}
 		if ml, err := ec.MailLabelList(ch.ID); err == nil && ml != nil {
 			sc.UnreadMail = ml.TotalUnread
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		sc.Online, _ = ec.Online(ch.ID)
+		if ch.Has(scopeOnline) {
+			sc.Online, _ = ec.Online(ch.ID)
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		queue, _ = ec.SkillQueue(ch.ID)
+		if ch.Has(scopeQueue) {
+			queue, _ = ec.SkillQueue(ch.ID)
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		sheet, _ = ec.Skills(ch.ID)
+		if ch.Has(scopeSkills) {
+			sheet, _ = ec.Skills(ch.ID)
+		}
 	}()
 	go func() {
 		defer wg.Done()
+		if !ch.Has(scopeJobs) {
+			return
+		}
 		personal, err := ec.IndustryJobs(ch.ID)
 		if err == nil {
 			jobs = personal
+		}
+		if !ch.Has(scopeCorpJobs) {
+			return
 		}
 		corpID, _, err := ec.CharacterPublic(ch.ID)
 		if err != nil || corpID == 0 {
@@ -526,7 +573,10 @@ var charSections = map[string]bool{
 	"mail": true,
 }
 
-func (s *Server) shell(ec *esi.Client, selectedID int64, section string) (map[string]any, *store.Character, error) {
+// Персонажи — только те, что принадлежат кабинету из контекста запроса;
+// чужой /characters/{id} поэтому сам собой становится 404 (selected
+// не найдётся в списке).
+func (s *Server) shell(r *http.Request, ec *esi.Client, selectedID int64, section string) (map[string]any, *store.Character, error) {
 	// The sidebar is on every screen: its reads stay in the refresher's
 	// warm tier so thirty alts never outrank the page being looked at.
 	ec = ec.Background()
@@ -536,7 +586,11 @@ func (s *Server) shell(ec *esi.Client, selectedID int64, section string) (map[st
 	if !charSections[section] {
 		section = ""
 	}
-	chars, err := s.Store.Characters()
+	user := userFrom(r)
+	if user == nil {
+		return nil, nil, errNoUser
+	}
+	chars, err := s.Store.Characters(user.ID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -583,7 +637,7 @@ func (s *Server) shell(ec *esi.Client, selectedID int64, section string) (map[st
 	sort.Strings(allTags)
 
 	// Hand-entered omega / MCT dates, shown on the group headers.
-	if omegas, err := s.Store.AccountOmegas(); err == nil {
+	if omegas, err := s.Store.AccountOmegas(user.ID); err == nil {
 		now := time.Now().UTC()
 		for i := range groups {
 			if o, ok := omegas[groups[i].Key]; ok && groups[i].Key != "" {
@@ -600,13 +654,24 @@ func (s *Server) shell(ec *esi.Client, selectedID int64, section string) (map[st
 		}
 	}
 
+	// Какие вкладки есть у выбранного персонажа: на что прав нет, того
+	// в сайдбаре и в строке вкладок не видно (scopes.go, layout.html).
+	secOK := map[string]bool{}
+	if selected != nil {
+		secOK = allowedSections(*selected)
+	}
+
 	return map[string]any{
 		"Groups":       groups,
 		"AllTags":      allTags,
 		"Selected":     selected,
 		"Section":      section,
+		"SecOK":        secOK,
 		"Corporations": s.corporations(ec, chars),
 		"Now":          time.Now(),
+		// Панель ESI Refresher — инструмент инстанса, её пункт меню
+		// виден только администратору.
+		"IsAdmin": user.Admin,
 	}, selected, nil
 }
 
@@ -647,22 +712,43 @@ func (s *Server) corporations(ec *esi.Client, chars []store.Character) []corpEnt
 }
 
 func (s *Server) render(w http.ResponseWriter, page string, data map[string]any, view *esi.ViewStatus) {
+	var esiErrs []string
 	if view != nil {
 		if view.Stale() {
 			data["Stale"] = true
 		}
 		// Refresh failures behind the data shown (a route backing off
-		// after an ESI error) join the page's own error list.
-		if errs := view.Errors(); len(errs) > 0 {
-			existing, _ := data["Errors"].([]string)
-			data["Errors"] = append(existing, errs...)
-		}
+		// after an ESI error) go behind the red dot in the header.
+		esiErrs = view.Errors()
 		// What this render read is what the page depends on: the SSE
 		// hub watches it while the page is open and pushes changes.
 		if view.Page != "" {
-			s.events().setDeps(view.Page, view.Deps())
+			s.events().setDeps(depKey{view.UserID, view.Page}, view.Deps())
 		}
 	}
+	// The page's own list splits the same way: what an ESI read returned
+	// joins the dot, everything else goes behind the yellow "!".
+	var pageErrs []string
+	if own, _ := data["Errors"].([]string); len(own) > 0 {
+		for _, m := range own {
+			if isESIErr(m) {
+				esiErrs = append(esiErrs, m)
+			} else {
+				pageErrs = append(pageErrs, m)
+			}
+		}
+	}
+	names := map[int64]string{}
+	if groups, _ := data["Groups"].([]accountGroup); groups != nil {
+		for _, g := range groups {
+			for _, ch := range g.Chars {
+				names[ch.ID] = ch.Name
+			}
+		}
+	}
+	data["ESIErrors"], data["ESIReauth"] = groupESIErrors(esiErrs, names)
+	data["ESIErrorsN"] = len(esiErrs)
+	data["PageErrors"] = pageErrs
 	if err := s.pages[page].ExecuteTemplate(w, "layout.html", data); err != nil {
 		log.Printf("render %s: %v", page, err)
 	}
@@ -690,17 +776,39 @@ type corpDivision struct {
 // editor, add/delete, and (later) auth options.
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "settings")
+	data, _, err := s.shell(r, ec, 0, "settings")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	lang := s.Store.Setting("language")
+	lang := s.Store.UserSetting(userFrom(r).ID, "language")
 	if lang == "" {
 		lang = "en"
 	}
 	data["Language"] = lang
 	data["Languages"] = esiLanguages
+	// Метка пресета у каждого персонажа выводится из tokens.scopes
+	// (scopes.go): что реально в токене, то и написано.
+	labels := map[int64]presetLabel{}
+	groups, _ := data["Groups"].([]accountGroup)
+	for _, g := range groups {
+		for _, ch := range g.Chars {
+			labels[ch.ID] = presetOf(ch.Character, s.presets())
+		}
+	}
+	data["Presets"] = labels
+	// Согласие делиться с руководством корпорации: галочка у каждого
+	// персонажа (share.go в store, раздел «Корпорация»).
+	shares := map[int64]bool{}
+	for _, g := range groups {
+		for _, ch := range g.Chars {
+			if sh, err := s.Store.CharShare(ch.ID); err == nil && sh != nil {
+				shares[ch.ID] = true
+			}
+		}
+	}
+	data["Shares"] = shares
+	data["FullLoginHref"] = loginHref("/settings")
 	s.render(w, "settings", data, stale)
 }
 
@@ -729,11 +837,16 @@ func (s *Server) handleSetLanguage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad language", http.StatusBadRequest)
 		return
 	}
-	if err := s.Store.SetSetting("language", lang); err != nil {
+	user := userFrom(r)
+	if err := s.Store.SetUserSetting(user.ID, "language", lang); err != nil {
 		httpError(w, "saving language", err)
 		return
 	}
-	s.ESI.SetLanguage(lang)
+	// Глобальный язык клиента — язык фоновых задач, то есть
+	// администратора; страницы берут свой на request-scoped view.
+	if user.Admin {
+		s.ESI.SetLanguage(lang)
+	}
 	// Язык живёт на вкладке «Персонализация» — возвращаемся на неё.
 	http.Redirect(w, r, "/settings#personal", http.StatusFound)
 }
@@ -871,7 +984,7 @@ func (s *Server) handleTypeInfo(w http.ResponseWriter, r *http.Request) {
 // prices, links and planet filters.
 func (s *Server) handlePlanetaryTool(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
@@ -912,7 +1025,7 @@ func (s *Server) handlePlanetaryTool(w http.ResponseWriter, r *http.Request) {
 	data["SDEReady"] = s.SDE.Available()
 
 	// Stored colony templates + generator options.
-	data["Templates"] = s.piViews()
+	data["Templates"] = s.piViews(userFrom(r).ID)
 	data["Tab"] = r.URL.Query().Get("tab")
 	data["ImportErr"] = r.URL.Query().Get("err")
 	data["Msg"] = r.URL.Query().Get("msg")
@@ -947,8 +1060,8 @@ type piFactoryLine struct {
 }
 
 // piViews decodes stored templates for display.
-func (s *Server) piViews() []piTemplateView {
-	list, err := s.Store.PITemplates()
+func (s *Server) piViews(userID int64) []piTemplateView {
+	list, err := s.Store.PITemplates(userID)
 	if err != nil {
 		return nil
 	}
@@ -1005,7 +1118,7 @@ func (s *Server) handlePIImport(w http.ResponseWriter, r *http.Request) {
 		name = "Шаблон"
 	}
 	sum := tpl.Describe(s.SDE.TierOf)
-	if _, err := s.Store.AddPITemplate(store.PITemplate{
+	if _, err := s.Store.AddPITemplate(userFrom(r).ID, store.PITemplate{
 		Name: name, PlanetType: tpl.Pln, ProductType: sum.Final,
 		CmdCtrLv: tpl.CmdCtrLv, Payload: payload,
 	}); err != nil {
@@ -1017,7 +1130,7 @@ func (s *Server) handlePIImport(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePIDelete(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.FormValue("id"), 10, 64)
-	if err := s.Store.DeletePITemplate(id); err != nil {
+	if err := s.Store.DeletePITemplate(userFrom(r).ID, id); err != nil {
 		httpError(w, "deleting template", err)
 		return
 	}
@@ -1084,7 +1197,7 @@ func (s *Server) handlePIGenerate(w http.ResponseWriter, r *http.Request) {
 		httpError(w, "generating template", err)
 		return
 	}
-	if _, err := s.Store.AddPITemplate(store.PITemplate{
+	if _, err := s.Store.AddPITemplate(userFrom(r).ID, store.PITemplate{
 		Name: tpl.Cmt, PlanetType: tpl.Pln, ProductType: target,
 		CmdCtrLv: tpl.CmdCtrLv, Payload: string(payload),
 	}); err != nil {
@@ -1142,7 +1255,7 @@ func (s *Server) handlePIRefineries(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		if _, err := s.Store.AddPITemplate(store.PITemplate{
+		if _, err := s.Store.AddPITemplate(userFrom(r).ID, store.PITemplate{
 			Name: tpl.Cmt, PlanetType: tpl.Pln, ProductType: id,
 			CmdCtrLv: tpl.CmdCtrLv, Payload: string(payload),
 		}); err == nil {
@@ -1432,12 +1545,12 @@ var miningPalette = []string{
 // and the moon ledgers of every corporation we have access to.
 func (s *Server) handleEmpireMining(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	chars := empireChars(data)
+	chars := empireCharsFor(data, "/mining")
 	if len(chars) == 0 {
 		s.render(w, "welcome", data, stale)
 		return
@@ -1918,12 +2031,12 @@ var fleetRolePrio = map[string]int{
 // best, and a stale composition is worse than none.
 func (s *Server) handleFleetTool(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	chars := empireChars(data)
+	chars := empireCharsFor(data, "/tools/fleet")
 
 	// Step one: who is in a fleet at all (one live call per character).
 	rows := make([]fleetCharRef, len(chars))
@@ -2626,77 +2739,16 @@ func (s *Server) corpWallets(ec *esi.Client, corps []corpEntry, divisions bool) 
 	return rows
 }
 
-// handleIndex renders the empire summary (or the welcome page while
-// no characters are added yet).
-func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
-	if err != nil {
-		httpError(w, "loading characters", err)
-		return
-	}
-	chars := empireChars(data)
-	if len(chars) == 0 {
-		s.render(w, "welcome", data, stale)
-		return
-	}
-
-	// Personal wallets are already gathered by the sidebar pass; the
-	// list under the "Персонажи всего" row goes richest first.
-	var charTotal float64
-	for _, ch := range chars {
-		charTotal += ch.Wallet
-	}
-	byWallet := append([]sideChar(nil), chars...)
-	sort.SliceStable(byWallet, func(i, j int) bool { return byWallet[i].Wallet > byWallet[j].Wallet })
-
-	corps, _ := data["Corporations"].([]corpEntry)
-	corpRows := s.corpWallets(ec, corps, false)
-	var corpTotal float64
-	for _, row := range corpRows {
-		corpTotal += row.Total
-	}
-
-	// Industry lines: the per-character rows plus an empire total.
-	var lines lineStats
-	for _, ch := range chars {
-		lines.MfgBusy += ch.Lines.MfgBusy
-		lines.MfgTotal += ch.Lines.MfgTotal
-		lines.SciBusy += ch.Lines.SciBusy
-		lines.SciTotal += ch.Lines.SciTotal
-		lines.ReaBusy += ch.Lines.ReaBusy
-		lines.ReaTotal += ch.Lines.ReaTotal
-	}
-
-	idle := 0
-	for _, ch := range chars {
-		if ch.QueueSkillID == 0 {
-			idle++
-		}
-	}
-
-	data["Chars"] = chars
-	data["CharWallets"] = byWallet
-	data["CharTotal"] = charTotal
-	data["CorpRows"] = corpRows
-	data["CorpTotal"] = corpTotal
-	data["GrandTotal"] = charTotal + corpTotal
-	data["Training"] = trainingOrder(chars)
-	data["IdleQueues"] = idle
-	data["LineTotals"] = lines
-	s.render(w, "empire", data, stale)
-}
-
 // handleEmpireWallets renders one game-style wallet header per
 // character and per corporation.
 func (s *Server) handleEmpireWallets(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	chars := empireChars(data)
+	chars := empireCharsFor(data, "/wallets")
 	if len(chars) == 0 {
 		s.render(w, "welcome", data, stale)
 		return
@@ -2757,12 +2809,12 @@ func (s *Server) handleEmpireWallets(w http.ResponseWriter, r *http.Request) {
 // character, in the same square-per-level shape as the skills page.
 func (s *Server) handleEmpireTraining(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	chars := empireChars(data)
+	chars := empireCharsFor(data, "/training")
 	if len(chars) == 0 {
 		s.render(w, "welcome", data, stale)
 		return
@@ -2830,18 +2882,62 @@ func (s *Server) handleEmpireTraining(w http.ResponseWriter, r *http.Request) {
 // busy with: one slot per line, filled with its job or marked free.
 func (s *Server) handleEmpireIndustry(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	chars := empireChars(data)
+	chars := empireCharsFor(data, "/industry")
 	if len(chars) == 0 {
 		s.render(w, "welcome", data, stale)
 		return
 	}
 
-	now := time.Now()
+	ov := s.industryOverview(ec, chars, time.Now())
+	data["Jobs"] = ov.Jobs
+	data["Tiles"] = ov.Tiles
+	data["LineTotals"] = ov.Lines
+	data["TotalCost"] = ov.Cost
+	s.render(w, "empire_industry", data, stale)
+}
+
+// indJob is one running job on the empire industry tab: the row carries
+// the installer and how loaded that character's lines of this very
+// kind are.
+type indJob struct {
+	jobRow
+	CharID  int64
+	Char    string
+	Account string
+	Kind    string // mfg | sci | rea
+	Busy    int    // installer's busy lines of this kind
+	Total   int
+	Ready   bool
+}
+
+// kindTile is one of the three header buttons of the industry tab: it
+// both reports the load of that line type and filters the list below.
+type kindTile struct {
+	Key   string
+	Name  string
+	Busy  int
+	Total int
+	Jobs  int
+	Ready int
+}
+
+// industryOverview is everything the industry tab shows; the summary
+// page reads the same numbers.
+type industryOverview struct {
+	Jobs  []indJob // every running job anywhere, nearest deadline first
+	Tiles []kindTile
+	Lines lineStats
+	Cost  float64 // install cost of all running jobs
+}
+
+// industryOverview gathers what every character's industry lines are
+// busy with.
+func (s *Server) industryOverview(ec *esi.Client, chars []sideChar, now time.Time) industryOverview {
 	perChar := make([][]jobRow, len(chars))
 	var wg sync.WaitGroup
 	for i, ch := range chars {
@@ -2876,18 +2972,6 @@ func (s *Server) handleEmpireIndustry(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 
 	// One flat list of everything running anywhere, newest deadline last.
-	// Each row carries the installer and how loaded that character's lines
-	// of this very kind are.
-	type indJob struct {
-		jobRow
-		CharID  int64
-		Char    string
-		Account string
-		Kind    string // mfg | sci | rea
-		Busy    int    // installer's busy lines of this kind
-		Total   int
-		Ready   bool
-	}
 	var jobs []indJob
 	var lines lineStats
 	kindJobs := map[string]int{}
@@ -2921,16 +3005,6 @@ func (s *Server) handleEmpireIndustry(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.SliceStable(jobs, func(a, b int) bool { return jobs[a].EndDate.Before(jobs[b].EndDate) })
 
-	// kindTile is one of the three header buttons: it both reports the
-	// load of that line type and filters the list below.
-	type kindTile struct {
-		Key   string
-		Name  string
-		Busy  int
-		Total int
-		Jobs  int
-		Ready int
-	}
 	tiles := []kindTile{
 		{Key: "mfg", Name: "Производство", Busy: lines.MfgBusy, Total: lines.MfgTotal},
 		{Key: "sci", Name: "Наука", Busy: lines.SciBusy, Total: lines.SciTotal},
@@ -2945,12 +3019,7 @@ func (s *Server) handleEmpireIndustry(w http.ResponseWriter, r *http.Request) {
 	for _, j := range jobs {
 		cost += j.Cost
 	}
-
-	data["Jobs"] = jobs
-	data["Tiles"] = tiles
-	data["LineTotals"] = lines
-	data["TotalCost"] = cost
-	s.render(w, "empire_industry", data, stale)
+	return industryOverview{Jobs: jobs, Tiles: tiles, Lines: lines, Cost: cost}
 }
 
 func (s *Server) handleAssets(w http.ResponseWriter, r *http.Request) {
@@ -4247,16 +4316,12 @@ type planetTotals struct {
 
 func (s *Server) handleEmpirePlanets(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	groups, _ := data["Groups"].([]accountGroup)
-	var chars []sideChar
-	for _, g := range groups {
-		chars = append(chars, g.Chars...)
-	}
+	chars := empireCharsFor(data, "/planets")
 	if len(chars) == 0 {
 		s.render(w, "welcome", data, stale)
 		return
@@ -4264,6 +4329,30 @@ func (s *Server) handleEmpirePlanets(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	var errs errList
+	ov := s.planetsOverview(ec, chars, now, &errs)
+	data["Chars"] = ov.Chars
+	data["NoColonies"] = ov.NoColonies
+	data["Totals"] = ov.Totals
+	data["Alerts"] = ov.Alerts
+	data["Yields"] = ov.Yields
+	data["Now"] = now
+	data["Errors"] = errs.list
+	s.render(w, "empire_planets", data, stale)
+}
+
+// planetsOverview is everything the empire planets tab shows; the
+// summary page reads the same totals and alerts.
+type planetsOverview struct {
+	Chars      []charPlanets // characters with at least one colony
+	NoColonies []string
+	Totals     planetTotals
+	Alerts     []colonyAlert // colonies already stopped first
+	Yields     []yieldRow
+}
+
+// planetsOverview reads every character's colonies and folds them into
+// the empire-wide totals, alert list and per-material yield.
+func (s *Server) planetsOverview(ec *esi.Client, chars []sideChar, now time.Time, errs *errList) planetsOverview {
 	blocks := make([]charPlanets, len(chars))
 	var wg sync.WaitGroup
 	for i, ch := range chars {
@@ -4368,14 +4457,7 @@ func (s *Server) handleEmpirePlanets(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].PerHour > rows[j].PerHour })
 
-	data["Chars"] = active
-	data["NoColonies"] = bare
-	data["Totals"] = totals
-	data["Alerts"] = alerts
-	data["Yields"] = rows
-	data["Now"] = now
-	data["Errors"] = errs.list
-	s.render(w, "empire_planets", data, stale)
+	return planetsOverview{Chars: active, NoColonies: bare, Totals: totals, Alerts: alerts, Yields: rows}
 }
 
 // slotAlerts turns one colony into the lines worth acting on: a dead
@@ -5112,13 +5194,15 @@ func (s *Server) handleMarketDepth(w http.ResponseWriter, r *http.Request) {
 
 // ── corporation pages ────────────────────────────────────────────────
 
+// corpFor берёт корпорации из shell(), то есть из персонажей кабинета:
+// корпорация, в которой нет ни одного своего персонажа, даёт 404.
 func (s *Server) corpFor(w http.ResponseWriter, r *http.Request, ec *esi.Client) (map[string]any, *corpEntry, bool) {
 	corpID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "bad id", http.StatusBadRequest)
 		return nil, nil, false
 	}
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return nil, nil, false
@@ -5344,7 +5428,9 @@ func (s *Server) handleSidebarOrder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	if err := s.Store.SaveSidebarOrder(groups); err != nil {
+	// Чужие id в теле запроса просто не найдут строк: SaveSidebarOrder
+	// правит персонажей только этого кабинета.
+	if err := s.Store.SaveSidebarOrder(userFrom(r).ID, groups); err != nil {
 		httpError(w, "saving order", err)
 		return
 	}
@@ -5364,6 +5450,14 @@ func (s *Server) handleBulkWaypoint(w http.ResponseWriter, r *http.Request) {
 	req.System = strings.TrimSpace(req.System)
 	if req.System == "" || len(req.IDs) == 0 {
 		http.Error(w, "system and ids required", http.StatusBadRequest)
+		return
+	}
+
+	// Чужие персонажи из тела запроса отбрасываются молча: маршрут им
+	// всё равно не поставить, а объяснять существование чужого id незачем.
+	req.IDs = s.ownCharacterIDs(r, req.IDs)
+	if len(req.IDs) == 0 {
+		http.NotFound(w, r)
 		return
 	}
 
@@ -5404,7 +5498,7 @@ type routeFolder struct {
 
 func (s *Server) handleRouteTreeGet(w http.ResponseWriter, r *http.Request) {
 	tree := []routeFolder{}
-	if raw := s.Store.Setting("route_tree"); raw != "" {
+	if raw := s.Store.UserSetting(userFrom(r).ID, "route_tree"); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &tree); err != nil {
 			log.Printf("route_tree: битый JSON в настройках: %v", err)
 		}
@@ -5419,7 +5513,7 @@ func (s *Server) handleRouteTreeSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw, _ := json.Marshal(tree)
-	if err := s.Store.SetSetting("route_tree", string(raw)); err != nil {
+	if err := s.Store.SetUserSetting(userFrom(r).ID, "route_tree", string(raw)); err != nil {
 		httpError(w, "saving route tree", err)
 		return
 	}
@@ -5444,6 +5538,12 @@ func (s *Server) handleRouteTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ids required", http.StatusBadRequest)
 		return
 	}
+	user := userFrom(r)
+	req.IDs = s.ownCharacterIDs(r, req.IDs)
+	if len(req.IDs) == 0 {
+		http.NotFound(w, r)
+		return
+	}
 	type status struct {
 		ID     int64  `json:"id"`
 		Online bool   `json:"online"`
@@ -5466,7 +5566,7 @@ func (s *Server) handleRouteTrack(w http.ResponseWriter, r *http.Request) {
 		s.lastSeen = map[int64]string{}
 	}
 	recents := []recentPlace{}
-	if raw := s.Store.Setting("route_recent"); raw != "" {
+	if raw := s.Store.UserSetting(user.ID, "route_recent"); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &recents)
 	}
 	changed := false
@@ -5492,7 +5592,7 @@ func (s *Server) handleRouteTrack(w http.ResponseWriter, r *http.Request) {
 	}
 	if changed {
 		raw, _ := json.Marshal(recents)
-		if err := s.Store.SetSetting("route_recent", string(raw)); err != nil {
+		if err := s.Store.SetUserSetting(user.ID, "route_recent", string(raw)); err != nil {
 			log.Printf("route_recent: %v", err)
 		}
 	}
@@ -5513,7 +5613,7 @@ func (s *Server) shellFor(w http.ResponseWriter, r *http.Request, ec *esi.Client
 		http.Error(w, "bad id", http.StatusBadRequest)
 		return nil, nil, false
 	}
-	data, selected, err := s.shell(ec, id, section)
+	data, selected, err := s.shell(r, ec, id, section)
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return nil, nil, false
@@ -5522,12 +5622,43 @@ func (s *Server) shellFor(w http.ResponseWriter, r *http.Request, ec *esi.Client
 		http.NotFound(w, r)
 		return nil, nil, false
 	}
+	// Вкладка без права в токене: объясняем, чего не хватает, вместо
+	// 401 из ESI в списке ошибок страницы.
+	if !sectionAllowed(*selected, section) {
+		s.renderNoScope(w, r, data, section)
+		return nil, nil, false
+	}
 	return data, selected, true
 }
 
 // ── auth & actions ───────────────────────────────────────────────────
 
+// handleLogin — одна ручка на два намерения. Аноним получает страницу
+// с единственной кнопкой (и уходит на SSO по `?go=1`), а у кого сессия
+// уже есть — сразу уезжает на SSO добавлять персонажа: так продолжают
+// работать ссылки «+ Добавить персонажа» и `/login?back=/reauth`.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	user := userFrom(r)
+	back := localPath(r.URL.Query().Get("back"))
+
+	intent := "signin"
+	if user != nil {
+		intent = "add"
+	}
+	// Явная смена кабинета на чужом (или своём) компьютере.
+	if r.URL.Query().Get("intent") == "signin" {
+		intent = "signin"
+	}
+
+	if user == nil && r.URL.Query().Get("go") == "" {
+		s.renderLogin(w, back, r.URL.Query().Get("denied"))
+		return
+	}
+
+	// Пресет решает, какие права попадут в токен. По умолчанию —
+	// основной («Альт»): так ведут себя и старые ссылки без `?preset=`.
+	preset, scopes := s.presetScopes(r.URL.Query().Get("preset"))
+
 	state, err := randomState()
 	if err != nil {
 		httpError(w, "generating state", err)
@@ -5541,15 +5672,57 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
+	// Одна кука несёт намерение, пресет и возврат: "add=alt/reauth".
 	http.SetCookie(w, &http.Cookie{
 		Name:     backCookie,
-		Value:    localPath(r.URL.Query().Get("back")),
+		Value:    intent + "=" + preset + back,
 		Path:     "/",
 		MaxAge:   600,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	})
-	http.Redirect(w, r, s.SSO.AuthorizeURL(state), http.StatusFound)
+	http.Redirect(w, r, s.SSO.AuthorizeURL(state, scopes), http.StatusFound)
+}
+
+// renderLogin рисует страницу входа — отдельный шаблон без layout:
+// сайдбар требует персонажей кабинета, которого ещё нет.
+func (s *Server) renderLogin(w http.ResponseWriter, back, denied string) {
+	href := func(preset string) string {
+		h := "/login?go=1&preset=" + preset
+		if back != "" {
+			h += "&back=" + url.QueryEscape(back)
+		}
+		return h
+	}
+	data := map[string]any{
+		"Href":         href(presetAlt),
+		"IndustryHref": href(presetIndustry),
+		"Message":      denyText(denied),
+	}
+	if err := s.login.ExecuteTemplate(w, "login.html", data); err != nil {
+		log.Printf("render login: %v", err)
+	}
+}
+
+// loginIntent разбирает куку намерения: "signin" или "add", затем
+// необязательный "=<пресет>", затем путь возврата (он всегда начинается
+// с «/», а ключ пресета «/» не содержит — разбор однозначен).
+func loginIntent(v string) (intent, preset, back string) {
+	for _, i := range []string{"signin", "add"} {
+		if !strings.HasPrefix(v, i) {
+			continue
+		}
+		rest := strings.TrimPrefix(v, i)
+		if strings.HasPrefix(rest, "=") {
+			preset, rest, _ = strings.Cut(rest[1:], "/")
+			if rest != "" {
+				rest = "/" + rest
+			}
+		}
+		return i, preset, localPath(rest)
+	}
+	// Кука из старой сборки: там лежал только путь.
+	return "signin", "", localPath(v)
 }
 
 func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
@@ -5579,8 +5752,61 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	intent, preset, back := "signin", "", ""
+	if c, err := r.Cookie(backCookie); err == nil {
+		// Что за права реально пришли, говорит claims.Scopes, и в базу
+		// идёт именно он; пресет из куки нужен только как согласие:
+		// «Производство» означает, что персонаж делится с руководством
+		// своей корпорации (страница входа говорит об этом прямо).
+		intent, preset, back = loginIntent(c.Value)
+	}
+	http.SetCookie(w, &http.Cookie{Name: backCookie, Path: "/", MaxAge: -1})
+
+	owner, known, err := s.Store.UserOfCharacter(claims.CharacterID)
+	if err != nil {
+		httpError(w, "loading character owner", err)
+		return
+	}
+	count, err := s.Store.UserCount()
+	if err != nil {
+		httpError(w, "counting users", err)
+		return
+	}
+
+	current := userFrom(r)
+	// Корпорацию персонажа спрашиваем только там, где от неё зависит
+	// решение: SIGNUP=corp, персонаж без кабинета, кабинеты уже есть.
+	corpAllowed := false
+	signin := intent != "add" || current == nil
+	if s.Auth.Signup == "corp" && signin && owner == 0 && count > 0 {
+		corpAllowed = s.sharesAdminCorp(claims.CharacterID)
+	}
+	action, userID, deny := resolveLogin(intent, s.Auth.Signup, current, owner, known, count, corpAllowed)
+	if action == loginDeny {
+		log.Printf("вход отклонён (%s): %s (%d)", deny, claims.CharacterName, claims.CharacterID)
+		http.Redirect(w, r, "/login?denied="+deny, http.StatusFound)
+		return
+	}
+	if action == loginCreate {
+		userID, err = s.Store.CreateUser(count == 0)
+		if err != nil {
+			httpError(w, "creating user", err)
+			return
+		}
+		log.Printf("заведён кабинет %d (admin=%v)", userID, count == 0)
+	}
+
+	// Вход с более узким набором прав: старый refresh-токен остаётся
+	// валидным у CCP, пока его не отозвать, — а смысл узкого пресета в
+	// том, что кабинет этих прав больше не держит. Ошибка отзыва только
+	// в лог: вход из-за неё ломаться не должен.
+	s.revokeIfNarrowed(claims.CharacterID, claims.CharacterName, claims.Scopes)
+
+	// Единственное место, где персонаж сохраняется с настоящим
+	// кабинетом. Чужого персонажа UpsertCharacter не забирает: user_id
+	// проставляется, только если он был нулевым.
 	err = s.Store.UpsertCharacter(
-		claims.CharacterID, claims.CharacterName,
+		userID, claims.CharacterID, claims.CharacterName,
 		tok.RefreshToken, tok.AccessToken,
 		time.Now().Add(time.Duration(tok.ExpiresIn)*time.Second),
 		claims.Scopes, s.SSO.ClientID,
@@ -5590,15 +5816,42 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("logged in: %s (%d), %d scopes", claims.CharacterName, claims.CharacterID, len(claims.Scopes))
-
-	back := ""
-	if c, err := r.Cookie(backCookie); err == nil {
-		back = localPath(c.Value)
+	// Согласие делиться с руководством корпорации. Вход пресетом
+	// «Производство» — это и есть согласие: страница входа пишет прямо,
+	// что навыки и линии этого персонажа увидит руководство его
+	// корпорации. Вход «Альтом» согласия не создаёт и уже выданного не
+	// трогает: его снимают галочкой в настройках.
+	if preset == presetIndustry {
+		if corpID, _, err := s.ESI.CharacterPublic(claims.CharacterID); err == nil && corpID != 0 {
+			if err := s.Store.SetCharShare(claims.CharacterID, corpID,
+				[]string{store.ShareSkills, store.ShareLines}); err != nil {
+				log.Printf("согласие %s (%d): %v", claims.CharacterName, claims.CharacterID, err)
+			}
+		} else if err != nil {
+			log.Printf("корпорация %s (%d) для согласия: %v", claims.CharacterName, claims.CharacterID, err)
+		}
 	}
-	http.SetCookie(w, &http.Cookie{Name: backCookie, Path: "/", MaxAge: -1})
+
+	// Сессию перевыпускаем на каждом входе: старый id (в том числе
+	// сессия другого кабинета на этом же браузере) больше не работает.
+	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
+		_ = s.Store.DeleteSession(c.Value)
+	}
+	raw, err := s.Store.CreateSession(userID, r.UserAgent(), s.Auth.ttl())
+	if err != nil {
+		httpError(w, "creating session", err)
+		return
+	}
+	s.setSessionCookie(w, raw)
+
+	log.Printf("logged in: %s (%d), %d scopes, кабинет %d", claims.CharacterName,
+		claims.CharacterID, len(claims.Scopes), userID)
+
 	if back == "" {
 		back = fmt.Sprintf("/characters/%d", claims.CharacterID)
+		if action != loginAttach {
+			back = "/" // вход в кабинет открывает сводку
+		}
 	}
 	http.Redirect(w, r, back, http.StatusFound)
 }
@@ -5609,8 +5862,12 @@ func (s *Server) handleSetAccount(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad id", http.StatusBadRequest)
 		return
 	}
+	if !s.ownsCharacter(r, id) {
+		http.NotFound(w, r)
+		return
+	}
 	account := strings.TrimSpace(r.FormValue("account"))
-	if err := s.Store.SetAccount(id, account); err != nil {
+	if err := s.Store.SetAccount(userFrom(r).ID, id, account); err != nil {
 		httpError(w, "saving account", err)
 		return
 	}
@@ -5627,6 +5884,10 @@ func (s *Server) handleSetTags(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	if !s.ownsCharacter(r, id) {
+		http.NotFound(w, r)
 		return
 	}
 	var tags []string
@@ -5651,11 +5912,48 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad id", http.StatusBadRequest)
 		return
 	}
+	if !s.ownsCharacter(r, id) {
+		http.NotFound(w, r)
+		return
+	}
 	if err := s.Store.DeleteCharacter(id); err != nil {
 		httpError(w, "deleting character", err)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// handleSetShare включает и выключает согласие делиться навыками и
+// производственными линиями персонажа с руководством его корпорации
+// (раздел «Корпорация»). Галочка стоит в настройках своего кабинета:
+// согласие даётся на входе производственным пресетом, а отзывается
+// здесь.
+func (s *Server) handleSetShare(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	if !s.ownsCharacter(r, id) {
+		http.NotFound(w, r)
+		return
+	}
+	if r.FormValue("on") == "1" {
+		corpID, _, err := s.ESI.CharacterPublic(id)
+		if err != nil {
+			httpError(w, "loading corporation", err)
+			return
+		}
+		err = s.Store.SetCharShare(id, corpID, []string{store.ShareSkills, store.ShareLines})
+		if err != nil {
+			httpError(w, "saving share", err)
+			return
+		}
+	} else if err := s.Store.DeleteCharShare(id); err != nil {
+		httpError(w, "deleting share", err)
+		return
+	}
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
 }
 
 // ── helpers ──────────────────────────────────────────────────────────

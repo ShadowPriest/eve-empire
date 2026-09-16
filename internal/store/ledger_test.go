@@ -30,7 +30,7 @@ func hangar() PlaceKey {
 func buy(t *testing.T, s *Store, id string, qty int64, unit float64, daysAgo int) {
 	t.Helper()
 	at := time.Now().AddDate(0, 0, -daysAgo)
-	_, err := s.PostDoc(
+	_, err := s.PostDoc(1,
 		Doc{Kind: "purchase", OwnerID: owner, At: at, Src: "test", SrcID: id},
 		[]Line{{Place: hangar(), TypeID: strontium, Qty: qty, CostTotal: float64(qty) * unit}},
 		nil)
@@ -49,7 +49,7 @@ func TestFIFOWorkedExample(t *testing.T) {
 	buy(t, s, "B", 200_000, 3400, 6) // 680 млн
 	buy(t, s, "C", 400_000, 2400, 3) // 960 млн
 
-	res, err := s.PostDoc(
+	res, err := s.PostDoc(1,
 		Doc{Kind: "manufacture", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "job1"},
 		[]Line{{Place: hangar(), TypeID: strontium, Qty: -600_000}},
 		nil)
@@ -92,7 +92,7 @@ func TestNoCostDrift(t *testing.T) {
 	buy(t, s, "B", 5, 1.0/7.0, 4)
 
 	for i, q := range []int64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1} {
-		if _, err := s.PostDoc(
+		if _, err := s.PostDoc(1,
 			Doc{Kind: "sale", OwnerID: owner, At: time.Now(), Src: "test",
 				SrcID: "s" + string(rune('a'+i))},
 			[]Line{{Place: hangar(), TypeID: strontium, Qty: -q}}, nil); err != nil {
@@ -131,7 +131,7 @@ func TestSpecificIdentification(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT id FROM acc_lot ORDER BY at DESC LIMIT 1`).Scan(&newest); err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.PostDoc(
+	res, err := s.PostDoc(1,
 		Doc{Kind: "manufacture", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "job2"},
 		[]Line{{Place: hangar(), TypeID: strontium, Qty: -100,
 			Alloc: []Alloc{{LotID: newest, Qty: 100}}}}, nil)
@@ -149,7 +149,7 @@ func TestSpecificIdentification(t *testing.T) {
 // must not be silently free — it becomes a flagged estimate lot.
 func TestShortfall(t *testing.T) {
 	s := testStore(t)
-	res, err := s.PostDoc(
+	res, err := s.PostDoc(1,
 		Doc{Kind: "sale", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "s1"},
 		[]Line{{Place: hangar(), TypeID: strontium, Qty: -50, ShortfallUnitCost: 3}}, nil)
 	if err != nil {
@@ -190,14 +190,14 @@ func TestScopeWidening(t *testing.T) {
 	s := testStore(t)
 	container := PlaceKey{OwnerID: owner, LocationID: station, HolderID: 999,
 		Flag: "Hangar", Name: "Закуп 14.08"}
-	if _, err := s.PostDoc(
+	if _, err := s.PostDoc(1,
 		Doc{Kind: "purchase", OwnerID: owner, At: time.Now().AddDate(0, 0, -1),
 			Src: "test", SrcID: "inbox"},
 		[]Line{{Place: container, TypeID: strontium, Qty: 100, CostTotal: 1000}},
 		nil); err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.PostDoc(
+	res, err := s.PostDoc(1,
 		Doc{Kind: "sale", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "sale1"},
 		[]Line{{Place: hangar(), TypeID: strontium, Qty: -100}}, nil)
 	if err != nil {
@@ -217,7 +217,7 @@ func TestTransferCarriesCost(t *testing.T) {
 
 	const other = int64(60003761)
 	to := PlaceKey{OwnerID: owner, LocationID: other, Flag: "Hangar"}
-	if _, err := s.PostDoc(
+	if _, err := s.PostDoc(1,
 		Doc{Kind: "transfer", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "mv1"},
 		[]Line{
 			{Place: hangar(), TypeID: strontium, Qty: -100, Scope: "location"},
@@ -250,7 +250,7 @@ func TestTransferCarriesCost(t *testing.T) {
 // profit still rests on guesses — the flag would launder itself away.
 func TestEstimateSurvivesTransfer(t *testing.T) {
 	s := testStore(t)
-	if _, err := s.PostDoc(
+	if _, err := s.PostDoc(1,
 		Doc{Kind: "opening", OwnerID: owner, At: time.Now().AddDate(0, 0, -2),
 			Src: "test", SrcID: "open"},
 		[]Line{{Place: hangar(), TypeID: strontium, Qty: 100,
@@ -258,7 +258,7 @@ func TestEstimateSurvivesTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 	to := PlaceKey{OwnerID: owner, LocationID: 60003761, Flag: "Hangar"}
-	if _, err := s.PostDoc(
+	if _, err := s.PostDoc(1,
 		Doc{Kind: "transfer", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "mv2"},
 		[]Line{
 			{Place: hangar(), TypeID: strontium, Qty: -100, Scope: "location"},
@@ -298,7 +298,7 @@ func TestManufactureCarriesCost(t *testing.T) {
 		cost float64
 		src  string
 	}{{tritanium, 1000, 5000, "m1"}, {pyerite, 500, 3000, "m2"}} {
-		if _, err := s.PostDoc(
+		if _, err := s.PostDoc(1,
 			Doc{Kind: "purchase", OwnerID: owner, At: at, Src: "test", SrcID: m.src},
 			[]Line{{Place: hangar(), TypeID: m.id, Qty: m.qty, CostTotal: m.cost}},
 			nil); err != nil {
@@ -308,7 +308,7 @@ func TestManufactureCarriesCost(t *testing.T) {
 
 	wip := PlaceKey{OwnerID: owner, LocationID: station, HolderID: 777, Flag: "WIP"}
 	const fee = 138.0
-	if _, err := s.PostDoc(
+	if _, err := s.PostDoc(1,
 		Doc{Kind: "manufacture", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "job"},
 		[]Line{
 			{Place: hangar(), TypeID: tritanium, Qty: -1000, Scope: "location"},
@@ -350,14 +350,14 @@ func TestReprocessSplitsByShare(t *testing.T) {
 		trit = int64(34)
 		mex  = int64(36)
 	)
-	if _, err := s.PostDoc(
+	if _, err := s.PostDoc(1,
 		Doc{Kind: "receipt", OwnerID: owner, At: time.Now().AddDate(0, 0, -1),
 			Src: "test", SrcID: "ore"},
 		[]Line{{Place: hangar(), TypeID: ore, Qty: 100, CostTotal: 10_000_000}},
 		nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PostDoc(
+	if _, err := s.PostDoc(1,
 		Doc{Kind: "reprocess", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "rp"},
 		[]Line{
 			{Place: hangar(), TypeID: ore, Qty: -100, Scope: "location"},
@@ -381,10 +381,10 @@ func TestReprocessSplitsByShare(t *testing.T) {
 // Иначе вчерашний отчёт однажды перестанет совпадать с сегодняшним.
 func TestPeriodClose(t *testing.T) {
 	s := testStore(t)
-	if err := s.SetClosedBefore(time.Now().AddDate(0, 0, -2)); err != nil {
+	if err := s.SetClosedBefore(1, time.Now().AddDate(0, 0, -2)); err != nil {
 		t.Fatal(err)
 	}
-	old, err := s.PostDoc(
+	old, err := s.PostDoc(1,
 		Doc{Kind: "purchase", OwnerID: owner, At: time.Now().AddDate(0, 0, -5),
 			Src: "test", SrcID: "old"},
 		[]Line{{Place: hangar(), TypeID: strontium, Qty: 10, CostTotal: 100}}, nil)
@@ -394,7 +394,7 @@ func TestPeriodClose(t *testing.T) {
 	if !old.Closed || old.Posted {
 		t.Errorf("документ старше закрытия принят: closed=%v posted=%v", old.Closed, old.Posted)
 	}
-	fresh, err := s.PostDoc(
+	fresh, err := s.PostDoc(1,
 		Doc{Kind: "purchase", OwnerID: owner, At: time.Now(), Src: "test", SrcID: "new"},
 		[]Line{{Place: hangar(), TypeID: strontium, Qty: 10, CostTotal: 100}}, nil)
 	if err != nil {

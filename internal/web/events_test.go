@@ -11,17 +11,21 @@ import (
 func TestHubRoutesChangesToDependentPages(t *testing.T) {
 	reg := esi.New(nil, nil, "test").Refresher()
 	h := newHub(reg)
-	h.setDeps("/characters/1/wallet", map[string]bool{"u-wallet": true, "u-online": false})
-	h.setDeps("/characters/2/wallet", map[string]bool{"u-other": true})
+	h.setDeps(depKey{1, "/characters/1/wallet"}, map[string]bool{"u-wallet": true, "u-online": false})
+	h.setDeps(depKey{1, "/characters/2/wallet"}, map[string]bool{"u-other": true})
+	// Тот же путь у ДРУГОГО кабинета — отдельный ключ и отдельные
+	// зависимости: подписчик первого кабинета их видеть не должен.
+	h.setDeps(depKey{2, "/characters/1/wallet"}, map[string]bool{"u-foreign": true})
 
-	sub := h.subscribe("/characters/1/wallet")
+	sub := h.subscribe(depKey{1, "/characters/1/wallet"})
 	defer h.unsubscribe(sub)
 
 	wallet := &esi.Kind{Title: "кошелёк"}
 	online := &esi.Kind{Title: "онлайн"}
 	h.changed("u-wallet", wallet)
-	h.changed("u-online", online) // sidebar dependency still notifies
-	h.changed("u-other", wallet)  // another page: not for this subscriber
+	h.changed("u-online", online)  // sidebar dependency still notifies
+	h.changed("u-other", wallet)   // another page: not for this subscriber
+	h.changed("u-foreign", wallet) // чужой кабинет на том же пути — тоже мимо
 
 	select {
 	case msg := <-sub.ch:

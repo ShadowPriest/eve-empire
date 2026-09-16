@@ -19,12 +19,25 @@ type Store struct {
 
 type Character struct {
 	ID       int64
+	UserID   int64 // кабинет-владелец; 0 = не привязан (до миграции кабинета)
 	Name     string
 	Account  string   // user-assigned account label for sidebar grouping
 	Tags     []string // user-assigned tags for sidebar filtering
 	AddedAt  time.Time
 	Scopes   []string
 	TokenExp time.Time
+}
+
+// Has — есть ли право в токене персонажа. Источник истины — `scp` из
+// JWT, сохранённый в `tokens.scopes`: пресет, который выбрали на входе,
+// нигде не хранится, а CCP может выдать не всё, что просили.
+func (c Character) Has(scope string) bool {
+	for _, s := range c.Scopes {
+		if s == scope {
+			return true
+		}
+	}
+	return false
 }
 
 func Open(path string, encryptionKey []byte) (*Store, error) {
@@ -76,6 +89,9 @@ CREATE TABLE IF NOT EXISTS tokens (
 		// позволяет показать это до первой неудачной попытки. Пусто = токен
 		// сохранён до появления учёта, приложение неизвестно.
 		`ALTER TABLE tokens ADD COLUMN client_id TEXT NOT NULL DEFAULT ''`,
+		// Кабинет-владелец персонажа (см. ARCHITECTURE.md, «Кабинет и
+		// пользователи»). 0 = ещё не привязан, миграция кабинета раздаёт 1.
+		`ALTER TABLE characters ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0`,
 	} {
 		if _, err := s.db.Exec(ddl); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
@@ -83,9 +99,45 @@ CREATE TABLE IF NOT EXISTS tokens (
 	}
 	_, err = s.db.Exec(`
 CREATE TABLE IF NOT EXISTS account_order (
-    account  TEXT PRIMARY KEY,
-    position INTEGER NOT NULL
+    user_id  INTEGER NOT NULL DEFAULT 0,
+    account  TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (user_id, account)
 );
+-- Кабинет: личность = множество персонажей, без имени и пароля.
+CREATE TABLE IF NOT EXISTS users (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at INTEGER NOT NULL, -- unix seconds
+    admin      INTEGER NOT NULL DEFAULT 0
+);
+-- Серверные сессии: в базе лежит hex SHA-256 от случайного id, сам id
+-- живёт только в куке, поэтому копия базы не даёт войти.
+CREATE TABLE IF NOT EXISTS sessions (
+    id_hash    TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_seen  INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    user_agent TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+-- Пользовательские настройки; инстансовые остаются в app_settings.
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id INTEGER NOT NULL,
+    key     TEXT NOT NULL,
+    value   TEXT NOT NULL,
+    PRIMARY KEY (user_id, key)
+);
+-- Согласие члена корпорации показывать её руководству часть своих
+-- данных (этап 5 плана кабинета). ESI таких прав не даёт вовсе —
+-- всё, что видит CEO, человек показал сам.
+CREATE TABLE IF NOT EXISTS char_share (
+    character_id   INTEGER PRIMARY KEY,
+    corporation_id INTEGER NOT NULL,
+    blocks         TEXT NOT NULL, -- список через запятую: skills, lines
+    created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS char_share_corp ON char_share(corporation_id);
 CREATE TABLE IF NOT EXISTS esi_cache (
     url     TEXT PRIMARY KEY,
     body    BLOB NOT NULL,
@@ -108,6 +160,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
 -- planetary colony templates in the game's export/import format
 CREATE TABLE IF NOT EXISTS pi_templates (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL DEFAULT 0,
     name         TEXT NOT NULL,
     planet_type  INTEGER NOT NULL DEFAULT 0,
     product_type INTEGER NOT NULL DEFAULT 0,
@@ -119,6 +172,7 @@ CREATE TABLE IF NOT EXISTS pi_templates (
 -- queue, so a plan lives here until it is pasted into the client
 CREATE TABLE IF NOT EXISTS skill_plans (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL DEFAULT 0,
     name         TEXT NOT NULL,
     character_id INTEGER NOT NULL DEFAULT 0,
     body         TEXT NOT NULL,
@@ -170,10 +224,12 @@ CREATE TABLE IF NOT EXISTS mining_ledger (
 -- every sidebar reorder. Dates are 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD'
 -- in EVE time (UTC); empty string = not active / unknown.
 CREATE TABLE IF NOT EXISTS account_omega (
-    account     TEXT PRIMARY KEY,
+    user_id     INTEGER NOT NULL DEFAULT 0,
+    account     TEXT NOT NULL,
     omega_until TEXT NOT NULL DEFAULT '',
     mct1_until  TEXT NOT NULL DEFAULT '',
-    mct2_until  TEXT NOT NULL DEFAULT ''
+    mct2_until  TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (user_id, account)
 )`)
 	if err != nil {
 		return err
@@ -198,7 +254,11 @@ CREATE TABLE IF NOT EXISTS account_omega (
 	if err := s.migrateSPFarm(); err != nil {
 		return err
 	}
-	return s.migrateAir()
+	if err := s.migrateAir(); err != nil {
+		return err
+	}
+	// Последней: раздаёт user_id по уже созданным таблицам.
+	return s.migrateCabinet()
 }
 
 // ── mining ledger ────────────────────────────────────────────────────
@@ -399,9 +459,9 @@ type PITemplate struct {
 	CreatedAt   time.Time
 }
 
-func (s *Store) PITemplates() ([]PITemplate, error) {
+func (s *Store) PITemplates(userID int64) ([]PITemplate, error) {
 	rows, err := s.db.Query(`SELECT id, name, planet_type, product_type, cmd_ctr_lv, payload, created_at
-		FROM pi_templates ORDER BY created_at DESC`)
+		FROM pi_templates WHERE user_id = ? ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -419,18 +479,18 @@ func (s *Store) PITemplates() ([]PITemplate, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) AddPITemplate(t PITemplate) (int64, error) {
+func (s *Store) AddPITemplate(userID int64, t PITemplate) (int64, error) {
 	res, err := s.db.Exec(`INSERT INTO pi_templates
-		(name, planet_type, product_type, cmd_ctr_lv, payload, created_at) VALUES (?,?,?,?,?,?)`,
-		t.Name, t.PlanetType, t.ProductType, t.CmdCtrLv, t.Payload, time.Now().Unix())
+		(user_id, name, planet_type, product_type, cmd_ctr_lv, payload, created_at) VALUES (?,?,?,?,?,?,?)`,
+		userID, t.Name, t.PlanetType, t.ProductType, t.CmdCtrLv, t.Payload, time.Now().Unix())
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
-func (s *Store) DeletePITemplate(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM pi_templates WHERE id = ?`, id)
+func (s *Store) DeletePITemplate(userID, id int64) error {
+	_, err := s.db.Exec(`DELETE FROM pi_templates WHERE id = ? AND user_id = ?`, id, userID)
 	return err
 }
 
@@ -444,9 +504,9 @@ type SkillPlan struct {
 	UpdatedAt   time.Time
 }
 
-func (s *Store) SkillPlans() ([]SkillPlan, error) {
+func (s *Store) SkillPlans(userID int64) ([]SkillPlan, error) {
 	rows, err := s.db.Query(`SELECT id, name, character_id, body, created_at, updated_at
-		FROM skill_plans ORDER BY updated_at DESC`)
+		FROM skill_plans WHERE user_id = ? ORDER BY updated_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -465,23 +525,23 @@ func (s *Store) SkillPlans() ([]SkillPlan, error) {
 }
 
 // SaveSkillPlan inserts a new plan or overwrites one by id.
-func (s *Store) SaveSkillPlan(p SkillPlan) (int64, error) {
+func (s *Store) SaveSkillPlan(userID int64, p SkillPlan) (int64, error) {
 	now := time.Now().Unix()
 	if p.ID > 0 {
 		_, err := s.db.Exec(`UPDATE skill_plans SET name = ?, character_id = ?, body = ?, updated_at = ?
-			WHERE id = ?`, p.Name, p.CharacterID, p.Body, now, p.ID)
+			WHERE id = ? AND user_id = ?`, p.Name, p.CharacterID, p.Body, now, p.ID, userID)
 		return p.ID, err
 	}
-	res, err := s.db.Exec(`INSERT INTO skill_plans (name, character_id, body, created_at, updated_at)
-		VALUES (?,?,?,?,?)`, p.Name, p.CharacterID, p.Body, now, now)
+	res, err := s.db.Exec(`INSERT INTO skill_plans (user_id, name, character_id, body, created_at, updated_at)
+		VALUES (?,?,?,?,?,?)`, userID, p.Name, p.CharacterID, p.Body, now, now)
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
 }
 
-func (s *Store) DeleteSkillPlan(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM skill_plans WHERE id = ?`, id)
+func (s *Store) DeleteSkillPlan(userID, id int64) error {
+	_, err := s.db.Exec(`DELETE FROM skill_plans WHERE id = ? AND user_id = ?`, id, userID)
 	return err
 }
 
@@ -674,23 +734,24 @@ type SidebarGroup struct {
 
 // SaveSidebarOrder persists the drag&drop arrangement: group order,
 // character order inside groups and account reassignment on cross-group moves.
-func (s *Store) SaveSidebarOrder(groups []SidebarGroup) error {
+func (s *Store) SaveSidebarOrder(userID int64, groups []SidebarGroup) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`DELETE FROM account_order`); err != nil {
+	if _, err := tx.Exec(`DELETE FROM account_order WHERE user_id = ?`, userID); err != nil {
 		return err
 	}
 	for gi, g := range groups {
-		if _, err := tx.Exec(`INSERT INTO account_order (account, position) VALUES (?, ?)`, g.Account, gi); err != nil {
+		if _, err := tx.Exec(`INSERT INTO account_order (user_id, account, position) VALUES (?, ?, ?)`,
+			userID, g.Account, gi); err != nil {
 			return err
 		}
 		for ci, id := range g.Chars {
-			if _, err := tx.Exec(`UPDATE characters SET account = ?, sort_order = ? WHERE character_id = ?`,
-				g.Account, ci, id); err != nil {
+			if _, err := tx.Exec(`UPDATE characters SET account = ?, sort_order = ?
+				WHERE character_id = ? AND user_id = ?`, g.Account, ci, id, userID); err != nil {
 				return err
 			}
 		}
@@ -699,8 +760,10 @@ func (s *Store) SaveSidebarOrder(groups []SidebarGroup) error {
 }
 
 // SetAccount updates the user-assigned account label of a character.
-func (s *Store) SetAccount(characterID int64, account string) error {
-	_, err := s.db.Exec(`UPDATE characters SET account = ? WHERE character_id = ?`, account, characterID)
+// Чужой персонаж не найдётся и не изменится.
+func (s *Store) SetAccount(userID, characterID int64, account string) error {
+	_, err := s.db.Exec(`UPDATE characters SET account = ? WHERE character_id = ? AND user_id = ?`,
+		account, characterID, userID)
 	return err
 }
 
@@ -710,7 +773,7 @@ var ErrAccountExists = errors.New("account already exists")
 
 // RenameAccount changes an account label everywhere it lives: on the
 // characters, in the sidebar order and on the omega dates.
-func (s *Store) RenameAccount(oldName, newName string) error {
+func (s *Store) RenameAccount(userID int64, oldName, newName string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -718,7 +781,8 @@ func (s *Store) RenameAccount(oldName, newName string) error {
 	defer tx.Rollback()
 
 	var n int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM characters WHERE account = ?`, newName).Scan(&n); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM characters WHERE account = ? AND user_id = ?`,
+		newName, userID).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {
@@ -727,19 +791,19 @@ func (s *Store) RenameAccount(oldName, newName string) error {
 	// Orphan rows under the new name (an account everyone was moved away
 	// from keeps its order/omega rows) would break the PK on UPDATE.
 	for _, q := range []string{
-		`DELETE FROM account_order WHERE account = ?`,
-		`DELETE FROM account_omega WHERE account = ?`,
+		`DELETE FROM account_order WHERE account = ? AND user_id = ?`,
+		`DELETE FROM account_omega WHERE account = ? AND user_id = ?`,
 	} {
-		if _, err := tx.Exec(q, newName); err != nil {
+		if _, err := tx.Exec(q, newName, userID); err != nil {
 			return err
 		}
 	}
 	for _, q := range []string{
-		`UPDATE characters SET account = ? WHERE account = ?`,
-		`UPDATE account_order SET account = ? WHERE account = ?`,
-		`UPDATE account_omega SET account = ? WHERE account = ?`,
+		`UPDATE characters SET account = ? WHERE account = ? AND user_id = ?`,
+		`UPDATE account_order SET account = ? WHERE account = ? AND user_id = ?`,
+		`UPDATE account_omega SET account = ? WHERE account = ? AND user_id = ?`,
 	} {
-		if _, err := tx.Exec(q, newName, oldName); err != nil {
+		if _, err := tx.Exec(q, newName, oldName, userID); err != nil {
 			return err
 		}
 	}
@@ -758,8 +822,9 @@ type AccountOmega struct {
 }
 
 // AccountOmegas returns the stored subscription dates keyed by account label.
-func (s *Store) AccountOmegas() (map[string]AccountOmega, error) {
-	rows, err := s.db.Query(`SELECT account, omega_until, mct1_until, mct2_until FROM account_omega`)
+func (s *Store) AccountOmegas(userID int64) (map[string]AccountOmega, error) {
+	rows, err := s.db.Query(`SELECT account, omega_until, mct1_until, mct2_until
+		FROM account_omega WHERE user_id = ?`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -777,23 +842,26 @@ func (s *Store) AccountOmegas() (map[string]AccountOmega, error) {
 
 // SetAccountOmega upserts the subscription dates of one account; all
 // three dates empty removes the row.
-func (s *Store) SetAccountOmega(o AccountOmega) error {
+func (s *Store) SetAccountOmega(userID int64, o AccountOmega) error {
 	if o.OmegaUntil == "" && o.MCT1Until == "" && o.MCT2Until == "" {
-		_, err := s.db.Exec(`DELETE FROM account_omega WHERE account = ?`, o.Account)
+		_, err := s.db.Exec(`DELETE FROM account_omega WHERE account = ? AND user_id = ?`, o.Account, userID)
 		return err
 	}
-	_, err := s.db.Exec(`INSERT INTO account_omega (account, omega_until, mct1_until, mct2_until)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(account) DO UPDATE SET
+	_, err := s.db.Exec(`INSERT INTO account_omega (user_id, account, omega_until, mct1_until, mct2_until)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(user_id, account) DO UPDATE SET
 			omega_until = excluded.omega_until,
 			mct1_until  = excluded.mct1_until,
 			mct2_until  = excluded.mct2_until`,
-		o.Account, o.OmegaUntil, o.MCT1Until, o.MCT2Until)
+		userID, o.Account, o.OmegaUntil, o.MCT1Until, o.MCT2Until)
 	return err
 }
 
 // UpsertCharacter stores/updates a character and its tokens after login.
-func (s *Store) UpsertCharacter(id int64, name string, refreshToken, accessToken string, expiresAt time.Time, scopes []string, clientID string) error {
+// Кабинет проставляется только новому персонажу (или непривязанному,
+// user_id=0): чужого персонажа вход не забирает — для переноса есть
+// AttachCharacter.
+func (s *Store) UpsertCharacter(userID, id int64, name string, refreshToken, accessToken string, expiresAt time.Time, scopes []string, clientID string) error {
 	enc, err := encrypt(s.key, []byte(refreshToken))
 	if err != nil {
 		return fmt.Errorf("encrypt refresh token: %w", err)
@@ -806,8 +874,11 @@ func (s *Store) UpsertCharacter(id int64, name string, refreshToken, accessToken
 	defer tx.Rollback()
 
 	if _, err := tx.Exec(`
-INSERT INTO characters (character_id, name, added_at) VALUES (?, ?, ?)
-ON CONFLICT(character_id) DO UPDATE SET name = excluded.name`, id, name, time.Now().Unix()); err != nil {
+INSERT INTO characters (character_id, name, added_at, user_id) VALUES (?, ?, ?, ?)
+ON CONFLICT(character_id) DO UPDATE SET
+    name    = excluded.name,
+    user_id = CASE WHEN characters.user_id = 0 THEN excluded.user_id ELSE characters.user_id END`,
+		id, name, time.Now().Unix(), userID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`
@@ -871,6 +942,21 @@ func (s *Store) RefreshToken(characterID int64) (string, error) {
 	return string(plain), nil
 }
 
+// CharacterScopes returns the scopes of the stored token, or nil when the
+// character has no token yet. Used at login to tell a widening set of
+// permissions from a narrowing one (internal/web/scopes.go).
+func (s *Store) CharacterScopes(characterID int64) ([]string, error) {
+	var scopes string
+	err := s.db.QueryRow(`SELECT scopes FROM tokens WHERE character_id = ?`, characterID).Scan(&scopes)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(scopes), nil
+}
+
 // AccessToken returns a cached access token and its expiry.
 func (s *Store) AccessToken(characterID int64) (string, time.Time, error) {
 	var tok string
@@ -879,14 +965,26 @@ func (s *Store) AccessToken(characterID int64) (string, time.Time, error) {
 	return tok, time.Unix(exp, 0), err
 }
 
-// Characters lists all stored characters.
-func (s *Store) Characters() ([]Character, error) {
+// AllCharacters lists every stored character regardless of cabinet — the
+// collector and the ESI Refresher work over the whole instance.
+func (s *Store) AllCharacters() ([]Character, error) { return s.characters(0, false) }
+
+// Characters lists the characters of one cabinet.
+func (s *Store) Characters(userID int64) ([]Character, error) { return s.characters(userID, true) }
+
+func (s *Store) characters(userID int64, filter bool) ([]Character, error) {
+	where, args := "", []any(nil)
+	if filter {
+		where = "WHERE c.user_id = ?"
+		args = append(args, userID)
+	}
 	rows, err := s.db.Query(`
-SELECT c.character_id, c.name, c.account, c.added_at, COALESCE(t.scopes, ''), COALESCE(t.expires_at, 0)
+SELECT c.character_id, c.user_id, c.name, c.account, c.added_at, COALESCE(t.scopes, ''), COALESCE(t.expires_at, 0)
 FROM characters c
 LEFT JOIN tokens t ON t.character_id = c.character_id
-LEFT JOIN account_order ao ON ao.account = c.account
-ORDER BY COALESCE(ao.position, 999999), c.account, c.sort_order, c.added_at`)
+LEFT JOIN account_order ao ON ao.account = c.account AND ao.user_id = c.user_id
+`+where+`
+ORDER BY COALESCE(ao.position, 999999), c.account, c.sort_order, c.added_at`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -897,7 +995,7 @@ ORDER BY COALESCE(ao.position, 999999), c.account, c.sort_order, c.added_at`)
 		var ch Character
 		var scopes string
 		var addedAt, tokenExp int64
-		if err := rows.Scan(&ch.ID, &ch.Name, &ch.Account, &addedAt, &scopes, &tokenExp); err != nil {
+		if err := rows.Scan(&ch.ID, &ch.UserID, &ch.Name, &ch.Account, &addedAt, &scopes, &tokenExp); err != nil {
 			return nil, err
 		}
 		ch.AddedAt = time.Unix(addedAt, 0)
@@ -919,11 +1017,15 @@ ORDER BY COALESCE(ao.position, 999999), c.account, c.sort_order, c.added_at`)
 	return out, nil
 }
 
-// DeleteCharacter removes a character and its tokens.
+// DeleteCharacter removes a character, its tokens and its corporation
+// consent: убрав персонажа из кабинета, человек перестаёт им делиться.
 func (s *Store) DeleteCharacter(characterID int64) error {
 	_, err := s.db.Exec(`DELETE FROM characters WHERE character_id = ?`, characterID)
 	if err == nil {
 		_, err = s.db.Exec(`DELETE FROM tokens WHERE character_id = ?`, characterID)
+	}
+	if err == nil {
+		err = s.DeleteCharShare(characterID)
 	}
 	return err
 }

@@ -176,12 +176,36 @@ func airOmegaActive(raw string, now time.Time) bool {
 	return false
 }
 
-// CloseAirMonth records the month result of EVERY character (zero-day
-// rows included — the whole picture matters), resets the day counters and
-// advances the month numbers, all in one transaction. Returns how many
-// characters were closed.
-func (s *Store) CloseAirMonth(now time.Time) (int, error) {
-	omegas, err := s.AccountOmegas()
+// airOmegaUntil — дата окончания омеги для каждого персонажа. Метка
+// аккаунта принадлежит кабинету, поэтому дата берётся по паре
+// (user_id, account), а не по одной метке: иначе одноимённые аккаунты
+// разных кабинетов путались бы между собой.
+func (s *Store) airOmegaUntil() (map[int64]string, error) {
+	rows, err := s.db.Query(`SELECT c.character_id, COALESCE(o.omega_until, '')
+		FROM characters c
+		LEFT JOIN account_omega o ON o.user_id = c.user_id AND o.account = c.account`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]string{}
+	for rows.Next() {
+		var id int64
+		var until string
+		if err := rows.Scan(&id, &until); err != nil {
+			return nil, err
+		}
+		out[id] = until
+	}
+	return out, rows.Err()
+}
+
+// CloseAirMonth records the month result of every character OF ONE
+// CABINET (zero-day rows included — the whole picture matters), resets
+// the day counters and advances the month numbers, all in one
+// transaction. Returns how many characters were closed.
+func (s *Store) CloseAirMonth(userID int64, now time.Time) (int, error) {
+	omegas, err := s.airOmegaUntil()
 	if err != nil {
 		return 0, err
 	}
@@ -196,37 +220,33 @@ func (s *Store) CloseAirMonth(now time.Time) (int, error) {
 	}
 	defer tx.Rollback()
 
-	rows, err := tx.Query(`SELECT character_id, account FROM characters`)
+	rows, err := tx.Query(`SELECT character_id FROM characters WHERE user_id = ?`, userID)
 	if err != nil {
 		return 0, err
 	}
-	type charRow struct {
-		id      int64
-		account string
-	}
-	var chars []charRow
+	var chars []int64
 	for rows.Next() {
-		var c charRow
-		if err := rows.Scan(&c.id, &c.account); err != nil {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		chars = append(chars, c)
+		chars = append(chars, id)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
 
-	for _, c := range chars {
-		st := states[c.id]
+	for _, id := range chars {
+		st := states[id]
 		if st.MonthNo < 1 {
 			st.MonthNo = 1
 		}
-		omega := airOmegaActive(omegas[c.account].OmegaUntil, now)
+		omega := airOmegaActive(omegas[id], now)
 		if _, err := tx.Exec(`INSERT INTO air_month
 			(character_id, closed_at, month_no, days_done, omega, sp) VALUES (?,?,?,?,?,?)`,
-			c.id, now.Unix(), st.MonthNo, st.DaysDone, boolInt(omega),
+			id, now.Unix(), st.MonthNo, st.DaysDone, boolInt(omega),
 			AirMonthSP(st.DaysDone, omega)); err != nil {
 			return 0, err
 		}
@@ -234,7 +254,7 @@ func (s *Store) CloseAirMonth(now time.Time) (int, error) {
 			VALUES (?, ?, 0, 0)
 			ON CONFLICT(character_id) DO UPDATE SET
 				month_no = excluded.month_no, days_done = 0, hand = 0`,
-			c.id, st.MonthNo%AirYearMonths+1); err != nil {
+			id, st.MonthNo%AirYearMonths+1); err != nil {
 			return 0, err
 		}
 	}
@@ -307,8 +327,8 @@ func airNextCalendarReset(now time.Time) time.Time {
 
 // AirResetEffective — действующий момент обновления шкалы: заданный
 // синхронизацией или, когда таймер не задан, вычисленный по календарю.
-func (s *Store) AirResetEffective(now time.Time) (at time.Time, stored bool) {
-	if at := s.AirResetAt(); !at.IsZero() {
+func (s *Store) AirResetEffective(userID int64, now time.Time) (at time.Time, stored bool) {
+	if at := s.AirResetAt(userID); !at.IsZero() {
 		return at, true
 	}
 	return airNextCalendarReset(now), false
@@ -316,8 +336,8 @@ func (s *Store) AirResetEffective(now time.Time) (at time.Time, stored bool) {
 
 // airWalletWindow — окно текущего месяца AIR: от его начала до
 // действующего момента обновления шкалы.
-func (s *Store) airWalletWindow(now time.Time) (from, to time.Time) {
-	at, _ := s.AirResetEffective(now)
+func (s *Store) airWalletWindow(userID int64, now time.Time) (from, to time.Time) {
+	at, _ := s.AirResetEffective(userID, now)
 	return airMonthStart(at), at
 }
 
@@ -330,8 +350,8 @@ func (s *Store) airWalletWindow(now time.Time) (from, to time.Time) {
 // метки ведёт счётчик за валетом в обе стороны. «В валете пусто» не
 // значит «не выполнял»: журнал собирается с конца июля и не у всех
 // альтов, поэтому нулевые дни без записей не обнуляют ничего.
-func (s *Store) AirSyncWalletDays(now time.Time) (map[int64]int, error) {
-	from, to := s.airWalletWindow(now)
+func (s *Store) AirSyncWalletDays(userID int64, now time.Time) (map[int64]int, error) {
+	from, to := s.airWalletWindow(userID, now)
 	maxDays := int(now.Sub(from).Hours()/24) + 1
 	maxDays = clampAir(maxDays, 0, AirMonthDays)
 	wallet := map[int64]int{}
@@ -339,17 +359,17 @@ func (s *Store) AirSyncWalletDays(now time.Time) (map[int64]int, error) {
 		// личный журнал: владелец — сам персонаж
 		`SELECT j.owner_id, COUNT(*) FROM hist_journal j
 			JOIN characters c ON c.character_id = j.owner_id
-			WHERE j.ref_type = 'daily_goal_payouts' AND j.reason = ?
+			WHERE c.user_id = ? AND j.ref_type = 'daily_goal_payouts' AND j.reason = ?
 			  AND j.division = 0 AND j.date >= ? AND j.date < ?
 			GROUP BY j.owner_id`,
 		// корп-дубли: персонаж в second_party_id
 		`SELECT j.second_party_id, COUNT(*) FROM hist_journal j
 			JOIN characters c ON c.character_id = j.second_party_id
-			WHERE j.ref_type = 'daily_goal_payouts' AND j.reason = ?
+			WHERE c.user_id = ? AND j.ref_type = 'daily_goal_payouts' AND j.reason = ?
 			  AND j.division > 0 AND j.date >= ? AND j.date < ?
 			GROUP BY j.second_party_id`,
 	} {
-		rows, err := s.db.Query(q, airDailyGoalReason, from.Unix(), to.Unix())
+		rows, err := s.db.Query(q, userID, airDailyGoalReason, from.Unix(), to.Unix())
 		if err != nil {
 			return nil, err
 		}
@@ -397,15 +417,20 @@ type AirWalletDiag struct {
 	Wallet     CollectorStatus // последний прогон сбора валетов
 }
 
-func (s *Store) AirWalletDiag(now time.Time) AirWalletDiag {
+func (s *Store) AirWalletDiag(userID int64, now time.Time) AirWalletDiag {
 	var d AirWalletDiag
-	from, to := s.airWalletWindow(now)
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM hist_journal
-		WHERE ref_type = 'daily_goal_payouts' AND date >= ? AND date < ?`,
-		from.Unix(), to.Unix()).Scan(&d.InWindow)
+	from, to := s.airWalletWindow(userID, now)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM hist_journal j
+		WHERE j.ref_type = 'daily_goal_payouts' AND j.date >= ? AND j.date < ?
+		  AND EXISTS (SELECT 1 FROM characters c WHERE c.user_id = ?
+		              AND c.character_id IN (j.owner_id, j.second_party_id))`,
+		from.Unix(), to.Unix(), userID).Scan(&d.InWindow)
 	var last int64
-	_ = s.db.QueryRow(`SELECT COALESCE(MAX(date), 0) FROM hist_journal
-		WHERE ref_type = 'daily_goal_payouts'`).Scan(&last)
+	_ = s.db.QueryRow(`SELECT COALESCE(MAX(j.date), 0) FROM hist_journal j
+		WHERE j.ref_type = 'daily_goal_payouts'
+		  AND EXISTS (SELECT 1 FROM characters c WHERE c.user_id = ?
+		              AND c.character_id IN (j.owner_id, j.second_party_id))`,
+		userID).Scan(&last)
 	if last > 0 {
 		d.LastPayout = time.Unix(last, 0).UTC()
 	}
@@ -435,9 +460,10 @@ func airSnapToDowntime(t time.Time) time.Time {
 	return dt
 }
 
-// AirResetAt returns the stored auto-reset moment (zero when unset).
-func (s *Store) AirResetAt() time.Time {
-	v, err := strconv.ParseInt(s.Setting("air_reset_at"), 10, 64)
+// AirResetAt returns the cabinet's stored auto-reset moment (zero when
+// unset).
+func (s *Store) AirResetAt(userID int64) time.Time {
+	v, err := strconv.ParseInt(s.UserSetting(userID, "air_reset_at"), 10, 64)
 	if err != nil || v <= 0 {
 		return time.Time{}
 	}
@@ -446,39 +472,39 @@ func (s *Store) AirResetAt() time.Time {
 
 // SetAirResetAt stores the auto-reset moment, snapped to the 11:00 UTC
 // downtime; zero clears it.
-func (s *Store) SetAirResetAt(t time.Time) error {
+func (s *Store) SetAirResetAt(userID int64, t time.Time) error {
 	if t.IsZero() {
-		return s.SetSetting("air_reset_at", "")
+		return s.SetUserSetting(userID, "air_reset_at", "")
 	}
-	return s.SetSetting("air_reset_at", strconv.FormatInt(airSnapToDowntime(t).Unix(), 10))
+	return s.SetUserSetting(userID, "air_reset_at", strconv.FormatInt(airSnapToDowntime(t).Unix(), 10))
 }
 
 // airAdvanceReset moves a due reset moment to the next monthly downtime
 // still ahead. One close per catch-up: after months of downtime the
 // intermediate results are unknowable anyway, so a single close must not
 // spawn duplicate rows.
-func (s *Store) airAdvanceReset(at, now time.Time) error {
+func (s *Store) airAdvanceReset(userID int64, at, now time.Time) error {
 	at = at.UTC()
 	for !at.After(now) {
 		// ДТ 1-го числа следующего месяца; time.Date нормализует декабрь+1.
 		at = time.Date(at.Year(), at.Month()+1, 1, 11, 0, 0, 0, time.UTC)
 	}
-	return s.SetAirResetAt(at)
+	return s.SetAirResetAt(userID, at)
 }
 
 // AirAutoClose closes the month when the effective reset moment (stored
 // or calendar-derived) has passed and schedules the next one. Both the
 // collector task and the page open call it — the page is the insurance
 // for a copy with collection off.
-func (s *Store) AirAutoClose(now time.Time) (bool, error) {
-	at, _ := s.AirResetEffective(now)
+func (s *Store) AirAutoClose(userID int64, now time.Time) (bool, error) {
+	at, _ := s.AirResetEffective(userID, now)
 	if at.After(now) {
 		return false, nil
 	}
-	if _, err := s.CloseAirMonth(now); err != nil {
+	if _, err := s.CloseAirMonth(userID, now); err != nil {
 		return false, err
 	}
-	return true, s.airAdvanceReset(at, now)
+	return true, s.airAdvanceReset(userID, at, now)
 }
 
 // AirYearSP — сколько SP от AIR каждый персонаж реально получил в этом
@@ -509,41 +535,27 @@ func (s *Store) AirYearSP(now time.Time) (map[int64]int64, error) {
 	if err != nil {
 		return out, err
 	}
-	omegas, err := s.AccountOmegas()
+	omegas, err := s.airOmegaUntil()
 	if err != nil {
 		return out, err
-	}
-	accounts := map[int64]string{}
-	crows, err := s.db.Query(`SELECT character_id, account FROM characters`)
-	if err != nil {
-		return out, err
-	}
-	defer crows.Close()
-	for crows.Next() {
-		var id int64
-		var acc string
-		if err := crows.Scan(&id, &acc); err != nil {
-			return out, err
-		}
-		accounts[id] = acc
 	}
 	for id, st := range states {
-		omega := airOmegaActive(omegas[accounts[id]].OmegaUntil, now)
+		omega := airOmegaActive(omegas[id], now)
 		out[id] += AirMonthSP(st.DaysDone, omega)
 	}
-	return out, crows.Err()
+	return out, nil
 }
 
 // AirManualClose is the button: close now; a reset moment already behind
 // us moves forward, one still ahead is left alone (the game will reset
 // then regardless of what was closed by hand).
-func (s *Store) AirManualClose(now time.Time) (int, error) {
-	n, err := s.CloseAirMonth(now)
+func (s *Store) AirManualClose(userID int64, now time.Time) (int, error) {
+	n, err := s.CloseAirMonth(userID, now)
 	if err != nil {
 		return n, err
 	}
-	if at := s.AirResetAt(); !at.IsZero() && !at.After(now) {
-		err = s.airAdvanceReset(at, now)
+	if at := s.AirResetAt(userID); !at.IsZero() && !at.After(now) {
+		err = s.airAdvanceReset(userID, at, now)
 	}
 	return n, err
 }

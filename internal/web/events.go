@@ -38,6 +38,15 @@ const (
 	maxPageDeps = 300
 )
 
+// depKey — ключ зависимостей страницы. Путь один и тот же у всех
+// кабинетов (`/planets`, `/`), а читает каждый кабинет свои URL, поэтому
+// ключ — пара (кабинет, страница): иначе чужой рендер подменял бы
+// подписку и присылал события о чужих данных.
+type depKey struct {
+	user int64
+	page string
+}
+
 type hub struct {
 	reg *esi.Refresher
 
@@ -45,12 +54,12 @@ type hub struct {
 	// deps: page key -> URL -> read by the page itself (true) or only by
 	// the sidebar (false). Sidebar URLs still trigger events (the
 	// sidebar must update live) but never become hot through a page.
-	deps map[string]map[string]bool
+	deps map[depKey]map[string]bool
 	subs map[*subscriber]struct{}
 }
 
 type subscriber struct {
-	page string
+	page depKey
 	ch   chan []byte
 
 	mu    sync.Mutex
@@ -59,7 +68,7 @@ type subscriber struct {
 }
 
 func newHub(reg *esi.Refresher) *hub {
-	h := &hub{reg: reg, deps: map[string]map[string]bool{}, subs: map[*subscriber]struct{}{}}
+	h := &hub{reg: reg, deps: map[depKey]map[string]bool{}, subs: map[*subscriber]struct{}{}}
 	reg.OnChange(h.changed)
 	return h
 }
@@ -71,11 +80,11 @@ func (s *Server) events() *hub {
 }
 
 // setDeps records what a page's last render read.
-func (h *hub) setDeps(page string, deps map[string]bool) {
+func (h *hub) setDeps(page depKey, deps map[string]bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if _, known := h.deps[page]; !known && len(h.deps) >= maxPageDeps {
-		live := map[string]bool{}
+		live := map[depKey]bool{}
 		for s := range h.subs {
 			live[s.page] = true
 		}
@@ -94,7 +103,7 @@ func (h *hub) setDeps(page string, deps map[string]bool) {
 	}
 }
 
-func (h *hub) subscribe(page string) *subscriber {
+func (h *hub) subscribe(page depKey) *subscriber {
 	s := &subscriber{page: page, ch: make(chan []byte, 4), kinds: map[string]bool{}}
 	h.mu.Lock()
 	h.subs[s] = struct{}{}
@@ -132,7 +141,7 @@ func (h *hub) rewatch() {
 
 // depsOf lists a page's own routes (sidebar reads excluded) as last
 // rendered — what "refresh now" may boost.
-func (h *hub) depsOf(page string) []string {
+func (h *hub) depsOf(page depKey) []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var out []string
@@ -195,13 +204,18 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad page", http.StatusBadRequest)
 		return
 	}
+	user := userFrom(r)
+	if user == nil {
+		http.Error(w, "нет сессии", http.StatusUnauthorized)
+		return
+	}
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
 	hub := s.events()
-	sub := hub.subscribe(page)
+	sub := hub.subscribe(depKey{user.ID, page})
 	defer hub.unsubscribe(sub)
 
 	h := w.Header()

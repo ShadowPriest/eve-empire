@@ -83,6 +83,7 @@ func main() {
 	recon := flag.Bool("recon", false, "показать расхождения реестра с действительностью")
 	showReport := flag.Bool("report", false, "показать отчёты реестра")
 	noCache := flag.Bool("nocache", true, "выбросить кэш ассетов перед запросом")
+	user := flag.Int64("user", 1, "кабинет, от имени которого работать (реестр, закрытый период)")
 	flag.Parse()
 
 	if *diff != "" {
@@ -106,7 +107,7 @@ func main() {
 		return
 	}
 	if *buildLedger != "" || *showReport {
-		runLedger(*buildLedger, *showReport)
+		runLedger(*user, *buildLedger, *showReport)
 		return
 	}
 	if *chars != "" && *contracts {
@@ -130,9 +131,9 @@ func main() {
 	}
 	defer st.Close()
 	ec := esi.New(sso.New(cfg.ClientID, cfg.ClientSecret, cfg.CallbackURL, cfg.Scopes, cfg.UserAgent), st, cfg.UserAgent)
-	ec.SetLanguage(st.Setting("language"))
+	ec.SetLanguage(st.AdminSetting("language"))
 
-	known, err := st.Characters()
+	known, err := st.AllCharacters()
 	if err != nil {
 		log.Fatalf("characters: %v", err)
 	}
@@ -196,7 +197,7 @@ func runCollector(name string) {
 	}
 	defer st.Close()
 	ec := esi.New(sso.New(cfg.ClientID, cfg.ClientSecret, cfg.CallbackURL, cfg.Scopes, cfg.UserAgent), st, cfg.UserAgent)
-	ec.SetLanguage(st.Setting("language"))
+	ec.SetLanguage(st.AdminSetting("language"))
 
 	var task *sched.Task
 	for _, t := range collect.New(ec, st, cfg.ClientID).Tasks() {
@@ -241,8 +242,8 @@ func dumpContracts(chars string) {
 	}
 	defer st.Close()
 	ec := esi.New(sso.New(cfg.ClientID, cfg.ClientSecret, cfg.CallbackURL, cfg.Scopes, cfg.UserAgent), st, cfg.UserAgent)
-	ec.SetLanguage(st.Setting("language"))
-	known, err := st.Characters()
+	ec.SetLanguage(st.AdminSetting("language"))
+	known, err := st.AllCharacters()
 	if err != nil {
 		log.Fatalf("characters: %v", err)
 	}

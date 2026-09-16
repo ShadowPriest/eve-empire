@@ -56,13 +56,13 @@ var buildDefaults = buildSet{Struct: "npc", Tax: 0.25, Broker: 3.0, Sales: 4.5}
 
 // buildSettings reads the settings, letting the query string override
 // them; anything passed explicitly becomes the new default.
-func (s *Server) buildSettings(q url.Values) buildSet {
+func (s *Server) buildSettings(userID int64, q url.Values) buildSet {
 	set := buildSet{
-		System: s.Store.Setting("build_system"),
-		Struct: s.Store.Setting("build_struct"),
-		Tax:    settingFloat(s.Store.Setting("build_tax"), buildDefaults.Tax),
-		Broker: settingFloat(s.Store.Setting("build_broker"), buildDefaults.Broker),
-		Sales:  settingFloat(s.Store.Setting("build_sales"), buildDefaults.Sales),
+		System: s.Store.UserSetting(userID, "build_system"),
+		Struct: s.Store.UserSetting(userID, "build_struct"),
+		Tax:    settingFloat(s.Store.UserSetting(userID, "build_tax"), buildDefaults.Tax),
+		Broker: settingFloat(s.Store.UserSetting(userID, "build_broker"), buildDefaults.Broker),
+		Sales:  settingFloat(s.Store.UserSetting(userID, "build_sales"), buildDefaults.Sales),
 	}
 	if set.Struct == "" {
 		set.Struct = buildDefaults.Struct
@@ -72,14 +72,14 @@ func (s *Server) buildSettings(q url.Values) buildSet {
 			return
 		}
 		*v = strings.TrimSpace(q.Get(form))
-		s.Store.SetSetting(key, *v)
+		s.Store.SetUserSetting(userID, key, *v)
 	}
 	saveF := func(key, form string, v *float64) {
 		if !q.Has(form) {
 			return
 		}
 		*v = settingFloat(q.Get(form), *v)
-		s.Store.SetSetting(key, strconv.FormatFloat(*v, 'f', -1, 64))
+		s.Store.SetUserSetting(userID, key, strconv.FormatFloat(*v, 'f', -1, 64))
 	}
 	save("build_system", "sys", &set.System)
 	save("build_struct", "struct", &set.Struct)
@@ -203,13 +203,14 @@ type buildOwned struct {
 
 func (s *Server) handleBuildCalc(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
+	userID := userFrom(r).ID
 	q := r.URL.Query()
-	set := s.buildSettings(q)
+	set := s.buildSettings(userID, q)
 
 	// The whole view lives in the URL, so a calculation can be linked.
 	query := strings.TrimSpace(q.Get("q"))
@@ -340,13 +341,13 @@ func (s *Server) handleBuildCalc(w http.ResponseWriter, r *http.Request) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		owned = s.ownedBlueprints(ec, rec.BlueprintID)
+		owned = s.ownedBlueprints(userID, ec, rec.BlueprintID)
 	}()
 	if charID != 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			skillMul, charName = s.industrySkills(ec, charID, rec)
+			skillMul, charName = s.industrySkills(userID, ec, charID, rec)
 		}()
 	}
 	wg.Wait()
@@ -476,8 +477,8 @@ func buildQty(base int64, runs int64, me int, reaction bool, matMul float64) int
 
 // ownedBlueprints finds the picked print among the characters' own
 // blueprints, so their researched ME/TE can be applied with one click.
-func (s *Server) ownedBlueprints(ec *esi.Client, blueprintID int64) []buildOwned {
-	chars, err := s.Store.Characters()
+func (s *Server) ownedBlueprints(userID int64, ec *esi.Client, blueprintID int64) []buildOwned {
+	chars, err := s.Store.Characters(userID)
 	if err != nil {
 		return nil
 	}
@@ -530,9 +531,9 @@ func (s *Server) ownedBlueprints(ec *esi.Client, blueprintID int64) []buildOwned
 // industrySkills turns a character's Industry / Advanced Industry into
 // the job-time multiplier. Reactions get no blueprint-skill discount, so
 // the multiplier stays 1 for them.
-func (s *Server) industrySkills(ec *esi.Client, charID int64, rec sde.Recipe) (float64, string) {
+func (s *Server) industrySkills(userID int64, ec *esi.Client, charID int64, rec sde.Recipe) (float64, string) {
 	name := ""
-	if chars, err := s.Store.Characters(); err == nil {
+	if chars, err := s.Store.Characters(userID); err == nil {
 		for _, ch := range chars {
 			if ch.ID == charID {
 				name = ch.Name

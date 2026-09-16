@@ -48,11 +48,12 @@ var histPeriods = []histPeriod{
 
 func (s *Server) handleOrdersTool(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
+	userID := userFrom(r).ID
 	var errs errList
 
 	q := r.URL.Query().Get("q")
@@ -137,7 +138,7 @@ func (s *Server) handleOrdersTool(w http.ResponseWriter, r *http.Request) {
 				data["HistSVG"] = renderHistoryChart(hist)
 			}
 		} else {
-			s.ordersBook(ec, data, &errs, region, typeID)
+			s.ordersBook(userID, ec, data, &errs, region, typeID)
 		}
 	}
 
@@ -147,7 +148,7 @@ func (s *Server) handleOrdersTool(w http.ResponseWriter, r *http.Request) {
 
 // ordersBook fills the «Цены» tab: the full region book split into
 // sellers and buyers, the pilots' own orders marked and listed.
-func (s *Server) ordersBook(ec *esi.Client, data map[string]any, errs *errList, region, typeID int64) {
+func (s *Server) ordersBook(userID int64, ec *esi.Client, data map[string]any, errs *errList, region, typeID int64) {
 	book, err := ec.RegionOrders(region, typeID)
 	if err != nil {
 		errs.add("ордербук", err)
@@ -155,7 +156,7 @@ func (s *Server) ordersBook(ec *esi.Client, data map[string]any, errs *errList, 
 
 	// Own orders of every pilot, in parallel: order_id → pilot maps
 	// the book rows, the per-type filter fills the "своя" table.
-	chars, _ := s.Store.Characters()
+	chars, _ := s.Store.Characters(userID)
 	mine := map[int64]string{}
 	var own []ownOrderRow
 	var firstChar int64

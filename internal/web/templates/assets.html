@@ -2,7 +2,6 @@
 <h1>{{.Selected.Name}} — имущество</h1>
 <p class="stats">Всего предметов: <b>{{num .Total}}</b> в {{len .Locations}} локациях</p>
 
-{{range .Errors}}<p class="err">{{.}}</p>{{end}}
 
 {{range .Locations}}
 <details class="sgroup maxm">

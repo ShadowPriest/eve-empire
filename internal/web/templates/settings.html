@@ -4,7 +4,6 @@
 {{define "content"}}
 <h1>Настройки</h1>
 
-{{range .Errors}}<p class="err">{{.}}</p>{{end}}
 
 <datalist id="acctlist">{{range .Groups}}{{if .Key}}<option value="{{.Key}}"></option>{{end}}{{end}}</datalist>
 
@@ -18,8 +17,12 @@
 
 <div data-spane="accounts">
 <h2>Аккаунты и персонажи</h2>
-<p style="margin:.4rem 0 .3rem;"><a class="btnlink" href="/login">+ Добавить персонажа</a>
-  <a class="btnlink" href="/reauth">Повторная авторизация</a></p>
+<div style="margin:.4rem 0 .3rem; display:flex; flex-wrap:wrap; gap:.4rem; align-items:center;">
+  <a class="btnlink" href="/login">+ Добавить персонажа</a>
+  <a class="btnlink" href="/reauth">Повторная авторизация</a>
+  <form method="post" action="/logout" style="margin:0;"><button type="submit" class="btnlink">Выйти</button></form>
+  <form method="post" action="/logout?all=1" style="margin:0;"><button type="submit" class="btnlink">Выйти на всех устройствах</button></form>
+</div>
 <p class="muted" style="font-size:.78rem; margin:.2rem 0 0;">
   Даты омеги и учебных мест — из окна «Учётная запись» игрового клиента, EVE-время (UTC).
   Формат: <b style="color:#b9c7da;">2027.03.01 05:20</b> или просто
@@ -83,7 +86,22 @@
        class="portrait{{if .Online}} online{{end}}" style="width:48px;height:48px;flex:none;">
   <div class="ci" style="min-width:0;flex:1;">
     <p style="margin:0;"><a class="alink" href="/characters/{{.ID}}">{{.Name}}</a>
-      {{if .Account}}<span class="muted" style="font-size:.78rem;">· {{.Account}}</span>{{end}}</p>
+      {{if .Account}}<span class="muted" style="font-size:.78rem;">· {{.Account}}</span>{{end}}
+      {{/* Пресет прав выведен из tokens.scopes: у неполного токена
+           половина вкладок кабинета просто не работает. */}}
+      {{$p := index $.Presets .ID}}
+      <span class="muted" style="font-size:.78rem;">· права: {{$p.Text}}</span>
+      {{if not $p.Full}}<a class="alink" style="font-size:.78rem;"
+        href="{{$.FullLoginHref}}">войти с полным набором</a>{{end}}</p>
+    {{/* Согласие делиться с руководством корпорации: ESI таких прав не
+         даёт, раздел «Корпорация» держится только на этой галочке. */}}
+    <form class="shareform" method="post" action="/characters/{{.ID}}/share" style="margin:.2rem 0 0;">
+      <input type="hidden" name="on" value="{{if index $.Shares .ID}}1{{else}}0{{end}}">
+      <label style="display:inline-flex;align-items:center;gap:.4rem;font-size:.78rem;color:#9fb2ca;">
+        <input type="checkbox" {{if index $.Shares .ID}}checked{{end}}
+               onchange="this.form.on.value = this.checked ? '1' : '0'; this.form.submit();">
+        делиться с руководством корпорации: навыки и линии</label>
+    </form>
     <div class="tagedit" data-id="{{.ID}}">
       {{range .Tags}}<span class="tag tchip" data-tag="{{.}}">{{.}}<i class="x" title="убрать тег">×</i></span>{{end}}
       <span class="tag tadd" title="добавить теги">+</span>

@@ -109,6 +109,30 @@
   .gearmenu a.disabled { color: #3f4b5f; cursor: default; }
   .gearmenu a.disabled:hover { background: none; color: #3f4b5f; }
   .esistatus .dot { margin: 0; width: 11px; height: 11px; cursor: pointer; }
+  /* error popovers under the dot and the "!": shown on hover, hidden
+     while empty (the containers are always in the DOM for the live swap) */
+  .stwrap { position: relative; display: flex; align-items: center; height: 100%; }
+  .errpop {
+    display: none; position: absolute; top: calc(100% - .4rem); right: -.6rem; z-index: 30;
+    min-width: 340px; max-width: min(640px, 90vw); padding: .5rem .8rem .6rem;
+    background: #121826; border: 1px solid #1f2a3d; border-radius: 0 0 8px 8px;
+    font-size: .78rem; line-height: 1.35; color: #c9d4e3; cursor: default;
+  }
+  .errpop::before { content: ''; position: absolute; left: 0; right: 0; top: -.6rem; height: .6rem; }
+  .stwrap:hover > .errpop:not(:empty) { display: block; }
+  .errpop .eph { margin: 0 0 .35rem; color: #7b8aa0; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; }
+  .errpop .epl { margin: .18rem 0 0; padding-left: .8rem; text-indent: -.8rem; }
+  .errpop .epl::before { content: '•'; color: #5f708c; margin-right: .35rem; }
+  .errpop .ekinds { color: #5f708c; white-space: nowrap; }
+  .errpop .epf { margin: .5rem 0 0; padding-top: .4rem; border-top: 1px solid #1f2a3d; }
+  #pageerrbox:empty { display: none; }
+  .pageerr {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; margin-right: .7rem; border-radius: 50%;
+    border: 1px solid #e0b25f; color: #e0b25f; font-size: .7rem; font-weight: 600;
+    line-height: 1; cursor: help; user-select: none;
+  }
+  .pageerr:hover { background: rgba(224,178,95,.15); }
   /* панель ESI Refresher: сводная строка вида + раскрывающийся список ручек */
   .reftbl { font-size: .8rem; }
   .refrow {
@@ -616,6 +640,37 @@
   .trtab .lvc { width: 30px; padding-right: .3rem; }
   .trtab td.ell { max-width: none; padding-right: .2rem; }
   .nowrap { white-space: nowrap; }
+  /* summary tiles are links to their tabs: same look as the filter tiles */
+  a.pstat { display: block; text-decoration: none; color: inherit; }
+  .sumtiles { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .sumtiles .kval.sev-warn { color: #e0b25f; }
+  /* attention feed and timeline side by side, stacked on a narrow window */
+  .sumgrid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(min(430px, 100%), 1fr));
+    gap: 1.2rem; margin-top: 1.2rem; align-items: start;
+  }
+  .sumgrid .card { margin: 0; }
+  .sumcnt { font-size: .78rem; font-weight: 400; color: #5f708c; letter-spacing: 0; margin-left: .3rem; }
+  .sumtab .sumtag { color: #7b8aa0; white-space: nowrap; font-size: .72rem; }
+  .sumtab .who { white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+  .sumtab .tmc { white-space: nowrap; text-align: right; width: 84px; padding-right: .5rem; }
+  .sumtab .src { text-align: right; white-space: nowrap; font-size: .72rem; }
+  .sumtab .src a { color: #4da3ff; text-decoration: none; }
+  .sumtab .src a:hover { color: #8cc4ff; }
+  /* the per-character matrix folds away; the heading is its switch */
+  .sumtog { cursor: pointer; user-select: none; }
+  .sumtog .tw { display: inline-block; width: .8em; color: #5f708c; transition: transform .12s; }
+  .sumtog.open .tw { transform: rotate(90deg); }
+  .summat { margin-top: .4rem; }
+  .summat[hidden] { display: none; }
+  .summat td, .summat th { vertical-align: middle; }
+  .summat .sumacct th {
+    padding-top: .7rem; text-transform: none; font-size: .8rem; color: #9fb2ca; font-weight: 500;
+  }
+  .summat .sqc { width: 62px; white-space: nowrap; }
+  .summat .who, .summat th { white-space: nowrap; }
+  .summat td.ell { max-width: 220px; }
+  .summat .tmc { width: 100px; }
 
   /* ── empire wallets tab: one game header per owner ── */
   /* the balance tiles are the switcher — no side menu: the totals are
@@ -1018,8 +1073,14 @@
   .lines .sci { color: #4da3ff; }
   .lines .rea { color: #9fe06c; }
   .lines .sep { color: #3a4557; margin: 0 .25rem; }
-  /* Adding a character lives on /settings only — the sidebar is a list
-     of alts, not a place to act. */
+  /* Добавление персонажа живёт на /settings; исключение — пустой
+     кабинет: там сайдбару нечего показывать, кроме приглашения. */
+  .charlist .addchar {
+    display: block; margin: .8rem 1rem; padding: .55rem .8rem;
+    border: 1px dashed #2a3648; border-radius: 3px; text-align: center;
+    color: #4da3ff; text-decoration: none; font-size: .82rem;
+  }
+  .charlist .addchar:hover { border-color: #4da3ff; background: #131c2b; }
   .bulkbar {
     display: none; padding: .7rem 1rem; border-top: 1px solid #1b2436;
     background: #101725; font-size: .8rem;
@@ -1271,6 +1332,10 @@
     padding: .15rem .3rem; border-radius: 6px; font-family: inherit;
   }
   .chargear:hover { color: #e8eef7; background: #1a2438; }
+  /* Бейдж навыка живёт на своей строке карточки: длинные названия
+     («Энергоснабжение микроварп-ускорителей · 38 СП/мин») обрезаются
+     многоточием, а не вылезают за карточку. */
+  .charcard .rb { max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
   .charsgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: .8rem; }
   @media (max-width: 1100px) { .charsgrid { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); } }
   td.ell {
@@ -1657,7 +1722,7 @@
   }
 </style>
 </head>
-<body data-stale="{{if .Stale}}1{{end}}" data-errors="{{join .Errors}}"
+<body data-stale="{{if .Stale}}1{{end}}" data-esierr="{{.ESIErrorsN}}"
       data-section="{{.Section}}" data-charid="{{if .Selected}}{{.Selected.ID}}{{end}}">
   <script>if (localStorage.getItem('eeSidebar') === '1') document.body.classList.add('sc');</script>
   <header class="topbar">
@@ -1666,20 +1731,37 @@
       <span class="word">EVE <span>EMPIRE</span></span>
     </div>
     <ul class="menu" id="topmenu">
-      <li><a class="toplink" href="/">Обзор</a></li>
+      {{/* the top link still opens the summary; hovering unfolds the
+           tab strip, so any empire page is one click from anywhere */}}
+      <li><a class="toplink" href="/">Обзор ▾</a>
+        <ul>
+          <li><a href="/">Сводка</a></li>
+          <li><a href="/wallets">Кошельки</a></li>
+          <li><a href="/training">Обучение</a></li>
+          <li><a href="/air">AIR</a></li>
+          <li><a href="/industry">Производство</a></li>
+          <li><a href="/planets">Планеты</a></li>
+          <li><a href="/mining">Добыча</a></li>
+          <li><a href="/structures">Структуры</a></li>
+          <li><a href="/accounting">Учёт</a></li>
+          <li><a href="/corp">Корпорация</a></li>
+        </ul>
+      </li>
       {{if .Selected}}
       <li><span>Персонаж ▾</span>
         <ul>
+          {{/* Вкладки, на которые у токена персонажа нет права, не
+               показываем вовсе (web/scopes.go, `.SecOK`). */}}
           <li><a href="/characters/{{.Selected.ID}}">Обзор</a></li>
-          <li><a href="/characters/{{.Selected.ID}}/skills">Навыки</a></li>
-          <li><a href="/characters/{{.Selected.ID}}/wallet">Кошелёк</a></li>
-          <li><a href="/characters/{{.Selected.ID}}/industry">Индустрия</a></li>
-          <li><a href="/characters/{{.Selected.ID}}/market">Маркет</a></li>
-          <li><a href="/characters/{{.Selected.ID}}/assets">Имущество</a></li>
-          <li><a href="/characters/{{.Selected.ID}}/blueprints">Чертежи</a></li>
-          <li><a href="/characters/{{.Selected.ID}}/planets">Планеты</a></li>
-          <li><a href="/characters/{{.Selected.ID}}/clones">Клоны и импланты</a></li>
-          <li><a href="/characters/{{.Selected.ID}}/mail">Почта</a></li>
+          {{if .SecOK.skills}}<li><a href="/characters/{{.Selected.ID}}/skills">Навыки</a></li>{{end}}
+          {{if .SecOK.wallet}}<li><a href="/characters/{{.Selected.ID}}/wallet">Кошелёк</a></li>{{end}}
+          {{if .SecOK.industry}}<li><a href="/characters/{{.Selected.ID}}/industry">Индустрия</a></li>{{end}}
+          {{if .SecOK.market}}<li><a href="/characters/{{.Selected.ID}}/market">Маркет</a></li>{{end}}
+          {{if .SecOK.assets}}<li><a href="/characters/{{.Selected.ID}}/assets">Имущество</a></li>{{end}}
+          {{if .SecOK.blueprints}}<li><a href="/characters/{{.Selected.ID}}/blueprints">Чертежи</a></li>{{end}}
+          {{if .SecOK.planets}}<li><a href="/characters/{{.Selected.ID}}/planets">Планеты</a></li>{{end}}
+          {{if .SecOK.clones}}<li><a href="/characters/{{.Selected.ID}}/clones">Клоны и импланты</a></li>{{end}}
+          {{if .SecOK.mail}}<li><a href="/characters/{{.Selected.ID}}/mail">Почта</a></li>{{end}}
         </ul>
       </li>
       {{else}}
@@ -1722,12 +1804,19 @@
       </li>
     </ul>
     <div class="esistatus">
-      <span class="dot green" id="esistatus" title="Данные актуальны · клик — обновить сейчас"></span>
+      {{/* Ошибки страницы — жёлтый «!», ошибки опроса ESI — красная точка;
+           списки всплывают при наведении. Оба контейнера есть всегда: живая
+           подмена (applyFresh) переливает в них свежее содержимое. */}}
+      <span class="stwrap" id="pageerrbox">{{template "pageerrbox" .}}</span>
+      <span class="stwrap">
+        <span class="dot green" id="esistatus" title="Данные актуальны · клик — обновить сейчас"></span>
+        <div class="errpop" id="esierrpop">{{template "esierrpop" .}}</div>
+      </span>
       <div class="gearbox">
         <button class="gear" id="gearbtn" type="button" title="Меню">⚙</button>
         <ul class="gearmenu" id="gearmenu">
           <li><a href="/settings">Настройки</a></li>
-          <li><a href="/refresher">ESI Refresher</a></li>
+          {{if .IsAdmin}}<li><a href="/refresher">ESI Refresher</a></li>{{end}}
           <li><a id="aboutlink">О программе</a></li>
           <li><a class="disabled" title="Авторизация появится позже">Выход</a></li>
         </ul>
@@ -1742,6 +1831,9 @@
       <span class="routechip" id="routechip" title="установить маршрут нескольким персонажам">маршрут…</span>
     </div>
     <div class="charlist" id="charlist">
+      {{if not .Groups}}
+      <a class="addchar" href="/login">+ Добавить персонажа</a>
+      {{end}}
       {{range .Groups}}
       <div class="group" data-account="{{.Key}}">
         <div class="acct" draggable="true" title="клик — свернуть аккаунт, перетаскивание — порядок">
@@ -1797,15 +1889,15 @@
     {{if .Selected}}
     <nav class="tabs">
       <a href="/characters/{{.Selected.ID}}" {{if eq .Section ""}}class="active"{{end}}>Обзор</a>
-      <a href="/characters/{{.Selected.ID}}/skills" {{if eq .Section "skills"}}class="active"{{end}}>Навыки</a>
-      <a href="/characters/{{.Selected.ID}}/wallet" {{if eq .Section "wallet"}}class="active"{{end}}>Кошелёк</a>
-      <a href="/characters/{{.Selected.ID}}/industry" {{if eq .Section "industry"}}class="active"{{end}}>Индустрия</a>
-      <a href="/characters/{{.Selected.ID}}/market" {{if eq .Section "market"}}class="active"{{end}}>Маркет</a>
-      <a href="/characters/{{.Selected.ID}}/assets" {{if eq .Section "assets"}}class="active"{{end}}>Имущество</a>
-      <a href="/characters/{{.Selected.ID}}/blueprints" {{if eq .Section "blueprints"}}class="active"{{end}}>Чертежи</a>
-      <a href="/characters/{{.Selected.ID}}/planets" {{if eq .Section "planets"}}class="active"{{end}}>Планеты</a>
-      <a href="/characters/{{.Selected.ID}}/clones" {{if eq .Section "clones"}}class="active"{{end}}>Клоны</a>
-      <a href="/characters/{{.Selected.ID}}/mail" {{if eq .Section "mail"}}class="active"{{end}}>Почта</a>
+      {{if .SecOK.skills}}<a href="/characters/{{.Selected.ID}}/skills" {{if eq .Section "skills"}}class="active"{{end}}>Навыки</a>{{end}}
+      {{if .SecOK.wallet}}<a href="/characters/{{.Selected.ID}}/wallet" {{if eq .Section "wallet"}}class="active"{{end}}>Кошелёк</a>{{end}}
+      {{if .SecOK.industry}}<a href="/characters/{{.Selected.ID}}/industry" {{if eq .Section "industry"}}class="active"{{end}}>Индустрия</a>{{end}}
+      {{if .SecOK.market}}<a href="/characters/{{.Selected.ID}}/market" {{if eq .Section "market"}}class="active"{{end}}>Маркет</a>{{end}}
+      {{if .SecOK.assets}}<a href="/characters/{{.Selected.ID}}/assets" {{if eq .Section "assets"}}class="active"{{end}}>Имущество</a>{{end}}
+      {{if .SecOK.blueprints}}<a href="/characters/{{.Selected.ID}}/blueprints" {{if eq .Section "blueprints"}}class="active"{{end}}>Чертежи</a>{{end}}
+      {{if .SecOK.planets}}<a href="/characters/{{.Selected.ID}}/planets" {{if eq .Section "planets"}}class="active"{{end}}>Планеты</a>{{end}}
+      {{if .SecOK.clones}}<a href="/characters/{{.Selected.ID}}/clones" {{if eq .Section "clones"}}class="active"{{end}}>Клоны</a>{{end}}
+      {{if .SecOK.mail}}<a href="/characters/{{.Selected.ID}}/mail" {{if eq .Section "mail"}}class="active"{{end}}>Почта</a>{{end}}
     </nav>
     {{end}}
     {{template "content" .}}
@@ -1937,8 +2029,17 @@
       .catch(() => setStatus('red', 'Не удалось запросить обновление'));
   });
   function applyErrors() {
-    const errs = document.body.dataset.errors && document.body.dataset.errors.trim();
-    if (errs) setStatus('red', errs); else setStatus('green');
+    const n = +(document.body.dataset.esierr || 0);
+    if (n) setStatus('red', 'Ошибки опроса ESI: ' + n + ' — наведите для списка'); else setStatus('green');
+  }
+  /* the popovers live in the header, which the swap never replaces —
+     carry the fresh lists over by hand */
+  function syncErrors(doc) {
+    ['pageerrbox', 'esierrpop'].forEach(id => {
+      const fresh = doc.getElementById(id), cur = document.getElementById(id);
+      if (fresh && cur && fresh.innerHTML !== cur.innerHTML) cur.innerHTML = fresh.innerHTML;
+    });
+    document.body.dataset.esierr = doc.body.dataset.esierr || '';
   }
   applyErrors();
 
@@ -2078,6 +2179,15 @@
      просто долго (большое имущество под семафором). Центр подменяется
      только если HTML реально изменился. Этап 2 заменит опрос на SSE и
      блочную подмену (TASKS.md, «ESI Refresher»). */
+  /* Ответ на фоновый запрос страницы. 401 значит, что сессия кончилась
+     (или её закрыли на другом устройстве): страницу входа нельзя вклеить
+     в блок — уходим на неё целиком. */
+  function pageText(r) {
+    if (r.status === 401) { location.assign('/login'); return new Promise(() => {}); }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.text();
+  }
+
   const POLL_STEPS = [1000, 2000, 3000, 5000, 8000, 10000, 15000, 20000, 30000, 30000];
   let pollTimer = null;
   function revalidate(attempt) {
@@ -2093,7 +2203,7 @@
     pollTimer = setTimeout(() => {
       pollTimer = null;
       fetch(url)
-        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+        .then(r => pageText(r))
         .then(html => {
           if (location.href !== url) return;   // пока ждали, ушли на другую страницу
           applyFresh(new DOMParser().parseFromString(html, 'text/html'));
@@ -2140,10 +2250,10 @@
     }
     syncSidebar(doc);
     syncMenu(doc);
+    syncErrors(doc);
     document.body.dataset.stale = doc.body.dataset.stale || '';
-    document.body.dataset.errors = doc.body.dataset.errors || '';
     if (swapped.length) afterMain(swapped); else applyErrors();
-    if (kinds && kinds.length && !document.body.dataset.errors.trim())
+    if (kinds && kinds.length && !+(document.body.dataset.esierr || 0))
       status.title = 'Обновлено ' + new Date().toLocaleTimeString() + ': ' + kinds.join(', ');
     return swapped.length;
   }
@@ -2169,7 +2279,7 @@
   function refetch(kinds) {
     const url = location.href;
     fetch(url)
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(r => pageText(r))
       .then(html => {
         if (location.href !== url) return;
         applyFresh(new DOMParser().parseFromString(html, 'text/html'), kinds);
@@ -2208,7 +2318,7 @@
   function navigate(url, push) {
     setStatus('yellow');
     fetch(url, {headers: {'X-Nav': '1'}})
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(r => pageText(r))
       .then(html => {
         if (push) history.pushState({nav: 1}, '', url);
         swapDoc(html, url);
@@ -4296,3 +4406,11 @@
   <a href="/accounting"{{if eq . "accounting"}} class="active"{{end}}>Учёт</a>
 </nav>
 {{end}}
+
+{{/* pageerrbox: the yellow "!" and its list — the page's own (non-ESI)
+   errors; empty when there are none, so the box collapses. */}}
+{{define "pageerrbox"}}{{if .PageErrors}}<span class="pageerr" title="Ошибки страницы — наведите для списка">!</span><div class="errpop"><p class="eph">Ошибки страницы: {{len .PageErrors}}</p>{{range .PageErrors}}<p class="epl">{{.}}</p>{{end}}</div>{{end}}{{end}}
+
+{{/* esierrpop: ESI polling failures behind the red dot, grouped by what
+   went wrong; each line lists the routes it hit. */}}
+{{define "esierrpop"}}{{if .ESIErrors}}<p class="eph">Опрос ESI: ошибок {{.ESIErrorsN}}</p>{{range .ESIErrors}}<p class="epl">{{.Msg}}{{if .Names}}: <b>{{tagsjoin .Names}}</b>{{end}}{{if .Kinds}} <span class="ekinds">· {{tagsjoin .Kinds}}</span>{{end}}{{if gt .N 1}} <span class="ekinds">×{{.N}}</span>{{end}}</p>{{end}}{{if .ESIReauth}}<p class="epf"><a class="alink" href="/reauth">Перелогинить персонажей → /reauth</a></p>{{end}}{{end}}{{end}}

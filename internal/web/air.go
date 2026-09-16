@@ -62,43 +62,72 @@ func (s *Server) handleAIR(w http.ResponseWriter, r *http.Request) {
 	// месяц пора закрывать, в историю должны попасть свежие дни.
 	// Открытие страницы дублирует задачу коллектора — страховка для
 	// копии с выключенным сбором (как снапшоты SP-фермы).
-	wallet, err := s.Store.AirSyncWalletDays(now)
+	userID := userFrom(r).ID
+	wallet, err := s.Store.AirSyncWalletDays(userID, now)
 	if err != nil {
 		log.Printf("AIR: дни из валета: %v", err)
 	}
-	if closed, err := s.Store.AirAutoClose(now); err != nil {
+	if closed, err := s.Store.AirAutoClose(userID, now); err != nil {
 		log.Printf("AIR: автозакрытие месяца: %v", err)
 	} else if closed {
 		log.Printf("AIR: месяц закрыт по таймеру при открытии страницы")
 		// Началось новое окно — старая сверка про закрытый месяц.
-		if wallet, err = s.Store.AirSyncWalletDays(now); err != nil {
+		if wallet, err = s.Store.AirSyncWalletDays(userID, now); err != nil {
 			log.Printf("AIR: дни из валета: %v", err)
 		}
 	}
 
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	chars := empireChars(data)
+	chars := empireCharsFor(data, "/air")
 	if len(chars) == 0 {
 		s.render(w, "welcome", data, stale)
 		return
 	}
 
-	states, err := s.Store.AirStates()
+	ov, err := s.airOverview(userID, chars, now, wallet)
 	if err != nil {
 		httpError(w, "loading AIR state", err)
 		return
 	}
+	data["Chars"] = ov.Rows
+	data["DayTiles"] = airDayTiles()
+	data["LiveTotal"] = ov.LiveTotal
+	data["Finals"] = ov.Finals
+	data["ResetAt"] = ov.ResetAt.UTC() // подпись на странице — EVE-время
+	data["ResetCalc"] = ov.ResetCalc
+	data["Diag"] = s.Store.AirWalletDiag(userID, now)
+	s.render(w, "empire_air", data, stale)
+}
+
+// airOverview — всё, что показывает вкладка AIR; сводка читает те же
+// цифры. Только чтение базы: синхронизация дней из валетов и автозакрытие
+// месяца остаются на обработчике вкладки и коллекторе.
+type airOverview struct {
+	Rows      []airCharRow
+	LiveTotal int64 // SP текущего месяца по всем персонажам
+	Finals    int   // персонажей, дошедших до финальной награды
+	ResetAt   time.Time
+	ResetCalc bool // срок сброса посчитан по календарю, а не введён
+}
+
+// airOverview собирает строки персонажей по состоянию AIR; wallet — дни с
+// выплатами по журналам (nil — не показывать).
+func (s *Server) airOverview(userID int64, chars []sideChar, now time.Time, wallet map[int64]int) (airOverview, error) {
+	var ov airOverview
+	states, err := s.Store.AirStates()
+	if err != nil {
+		return ov, err
+	}
 	hist, err := s.Store.AirMonths()
 	if err != nil {
-		httpError(w, "loading AIR history", err)
-		return
+		return ov, fmt.Errorf("history: %w", err)
 	}
-	omegas, _ := s.Store.AccountOmegas()
+	omegas, _ := s.Store.AccountOmegas(userID)
 
 	// Свежайшая закрытая строка каждого (персонаж, номер месяца) — ей
 	// заливаются пройденные плитки; счётчик закрытых месяцев — для суммы.
@@ -178,15 +207,8 @@ func (s *Server) handleAIR(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data["Chars"] = rows
-	data["DayTiles"] = airDayTiles()
-	data["LiveTotal"] = liveTotal
-	data["Finals"] = finals
-	resetAt, resetStored := s.Store.AirResetEffective(now)
-	data["ResetAt"] = resetAt.UTC() // подпись на странице — EVE-время
-	data["ResetCalc"] = !resetStored
-	data["Diag"] = s.Store.AirWalletDiag(now)
-	s.render(w, "empire_air", data, stale)
+	resetAt, resetStored := s.Store.AirResetEffective(userID, now)
+	return airOverview{Rows: rows, LiveTotal: liveTotal, Finals: finals, ResetAt: resetAt, ResetCalc: !resetStored}, nil
 }
 
 // numStr — 1 234 567 для тултипов, собранных в Go-коде.
@@ -207,6 +229,10 @@ func (s *Server) handleAIRDays(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad params", http.StatusBadRequest)
 		return
 	}
+	if !s.ownsCharacter(r, char) {
+		http.NotFound(w, r)
+		return
+	}
 	if err := s.Store.SetAirDays(char, days); err != nil {
 		httpError(w, "saving AIR days", err)
 		return
@@ -222,6 +248,10 @@ func (s *Server) handleAIRMonth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad params", http.StatusBadRequest)
 		return
 	}
+	if !s.ownsCharacter(r, char) {
+		http.NotFound(w, r)
+		return
+	}
 	if err := s.Store.SetAirMonth(char, month); err != nil {
 		httpError(w, "saving AIR month", err)
 		return
@@ -231,7 +261,7 @@ func (s *Server) handleAIRMonth(w http.ResponseWriter, r *http.Request) {
 
 // handleAIRClose — кнопка «Начать новый месяц».
 func (s *Server) handleAIRClose(w http.ResponseWriter, r *http.Request) {
-	n, err := s.Store.AirManualClose(time.Now().UTC())
+	n, err := s.Store.AirManualClose(userFrom(r).ID, time.Now().UTC())
 	if err != nil {
 		httpError(w, "closing AIR month", err)
 		return
@@ -244,9 +274,10 @@ func (s *Server) handleAIRClose(w http.ResponseWriter, r *http.Request) {
 // остаток как его показывает игра («28д 1ч 2мин 29с»); пустое поле
 // выключает таймер.
 func (s *Server) handleAIRReset(w http.ResponseWriter, r *http.Request) {
+	userID := userFrom(r).ID
 	raw := strings.TrimSpace(r.FormValue("left"))
 	if raw == "" {
-		if err := s.Store.SetAirResetAt(time.Time{}); err != nil {
+		if err := s.Store.SetAirResetAt(userID, time.Time{}); err != nil {
 			httpError(w, "clearing AIR timer", err)
 			return
 		}
@@ -258,7 +289,7 @@ func (s *Server) handleAIRReset(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := s.Store.SetAirResetAt(time.Now().UTC().Add(d)); err != nil {
+	if err := s.Store.SetAirResetAt(userID, time.Now().UTC().Add(d)); err != nil {
 		httpError(w, "saving AIR timer", err)
 		return
 	}

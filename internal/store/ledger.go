@@ -182,8 +182,8 @@ type PostResult struct {
 
 // ClosedBefore is the instant the books are sealed at. Anything older is
 // refused, so yesterday's report cannot quietly change under a reader.
-func (s *Store) ClosedBefore() time.Time {
-	v := s.Setting("acc.closed_before")
+func (s *Store) ClosedBefore(userID int64) time.Time {
+	v := s.UserSetting(userID, "acc.closed_before")
 	if v == "" {
 		return time.Time{}
 	}
@@ -195,11 +195,11 @@ func (s *Store) ClosedBefore() time.Time {
 }
 
 // SetClosedBefore seals everything before t. A zero time reopens.
-func (s *Store) SetClosedBefore(t time.Time) error {
+func (s *Store) SetClosedBefore(userID int64, t time.Time) error {
 	if t.IsZero() {
-		return s.SetSetting("acc.closed_before", "")
+		return s.SetUserSetting(userID, "acc.closed_before", "")
 	}
-	return s.SetSetting("acc.closed_before", strconv.FormatInt(t.Unix(), 10))
+	return s.SetUserSetting(userID, "acc.closed_before", strconv.FormatInt(t.Unix(), 10))
 }
 
 // ── проводка ─────────────────────────────────────────────────────────
@@ -207,7 +207,7 @@ func (s *Store) SetClosedBefore(t time.Time) error {
 // PostDoc writes one document with its lines and cash in a single
 // transaction. Re-posting the same (src, src_id) is a no-op, which is what
 // lets the whole ledger be rebuilt from hist_* by simply running again.
-func (s *Store) PostDoc(d Doc, lines []Line, cash []CashLine) (PostResult, error) {
+func (s *Store) PostDoc(userID int64, d Doc, lines []Line, cash []CashLine) (PostResult, error) {
 	var res PostResult
 
 	// ГРАБЛЯ: у store одно соединение (SetMaxOpenConns(1)), поэтому любой
@@ -217,7 +217,7 @@ func (s *Store) PostDoc(d Doc, lines []Line, cash []CashLine) (PostResult, error
 	// Закрытый период не правится задним числом: поправки идут новым
 	// документом, иначе вчерашний отчёт однажды перестанет совпадать с
 	// сегодняшним и доверия к цифрам не будет (§3).
-	if closed := s.ClosedBefore(); !closed.IsZero() && d.At.Before(closed) {
+	if closed := s.ClosedBefore(userID); !closed.IsZero() && d.At.Before(closed) {
 		return PostResult{Closed: true}, nil
 	}
 

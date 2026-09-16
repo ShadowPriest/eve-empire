@@ -20,9 +20,14 @@ type Builder struct {
 	Store *store.Store
 	ESI   *esi.Client
 	SDE   *sde.DB // нужен производству: состав работы ESI не отдаёт
+	// UserID — кабинет, от имени которого идёт проводка: закрытый
+	// период (acc.closed_before) у каждого кабинета свой.
+	UserID int64
 }
 
-func New(st *store.Store, ec *esi.Client) *Builder { return &Builder{Store: st, ESI: ec} }
+func New(st *store.Store, ec *esi.Client, userID int64) *Builder {
+	return &Builder{Store: st, ESI: ec, UserID: userID}
+}
 
 // WithSDE attaches the static database so production can be posted.
 func (b *Builder) WithSDE(d *sde.DB) *Builder { b.SDE = d; return b }
@@ -138,7 +143,7 @@ func (b *Builder) Trades() (Result, error) {
 			}
 		}
 
-		r, err := b.Store.PostDoc(store.Doc{
+		r, err := b.Store.PostDoc(b.UserID, store.Doc{
 			Kind: kind, OwnerID: t.OwnerID, At: t.Date,
 			Src: "esi:transaction", SrcID: key,
 		}, []store.Line{line}, cash)
@@ -274,7 +279,7 @@ func (b *Builder) BrokerFees() (Result, error) {
 		} else {
 			matched++
 		}
-		r, err := b.Store.PostDoc(store.Doc{
+		r, err := b.Store.PostDoc(b.UserID, store.Doc{
 			Kind: "fee", OwnerID: f.OwnerID, At: f.Date,
 			Src: "esi:brokers_fee", SrcID: key, Note: note,
 		}, nil, []store.CashLine{{OwnerID: f.OwnerID, Division: f.Division,

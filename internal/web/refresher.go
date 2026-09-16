@@ -55,9 +55,16 @@ type refTaskRow struct {
 	Stale   bool // last success older than two intervals
 }
 
+// Панель ESI Refresher показывает работу всего инстанса (все
+// персонажи, общий кэш, общие множители), поэтому она админская. Не-админ
+// получает 404: существование служебной страницы ему знать незачем.
 func (s *Server) handleRefresherPage(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		http.NotFound(w, r)
+		return
+	}
 	ec, view := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
@@ -67,7 +74,7 @@ func (s *Server) handleRefresherPage(w http.ResponseWriter, r *http.Request) {
 	snap := reg.Snapshot()
 
 	names := map[int64]string{}
-	if chars, err := s.Store.Characters(); err == nil {
+	if chars, err := s.Store.AllCharacters(); err == nil {
 		for _, ch := range chars {
 			names[ch.ID] = ch.Name
 		}
@@ -190,6 +197,10 @@ func (s *Server) handleRefresherPage(w http.ResponseWriter, r *http.Request) {
 
 // handleRefresherMult stores a kind's multiplier: form fields kind, mult.
 func (s *Server) handleRefresherMult(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		http.NotFound(w, r)
+		return
+	}
 	kind := r.FormValue("kind")
 	mult, err := strconv.ParseFloat(strings.TrimSpace(r.FormValue("mult")), 64)
 	if err != nil || mult < 0 || mult > 1000 {
@@ -221,12 +232,16 @@ func (s *Server) handleRefresherMult(w http.ResponseWriter, r *http.Request) {
 // cannot be refreshed earlier (CCP serves the same snapshot), so the
 // answer says how soon the next one can be.
 func (s *Server) handleRefresherNow(w http.ResponseWriter, r *http.Request) {
+	if !isAdmin(r) {
+		http.NotFound(w, r)
+		return
+	}
 	page := r.FormValue("page")
 	if !strings.HasPrefix(page, "/") {
 		http.Error(w, "bad page", http.StatusBadRequest)
 		return
 	}
-	urls := s.events().depsOf(page)
+	urls := s.events().depsOf(depKey{userFrom(r).ID, page})
 	boosted, next := s.ESI.Refresher().Boost(urls)
 	writeJSON(w, map[string]any{
 		"boosted": boosted,

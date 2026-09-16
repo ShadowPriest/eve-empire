@@ -158,7 +158,7 @@ func (b *Builder) Opening(priceSource string) (Result, error) {
 			layers[k] = ls
 		}
 
-		r, err := b.Store.PostDoc(store.Doc{
+		r, err := b.Store.PostDoc(b.UserID, store.Doc{
 			Kind: "opening", OwnerID: ownerID, At: at,
 			Src: "opening", SrcID: fmt.Sprint(ownerID),
 			Note: "инвентаризация империи, цены: " + priceSource,

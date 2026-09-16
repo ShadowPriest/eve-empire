@@ -149,7 +149,7 @@ func (s *Server) handleRenameAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if newName != oldName {
-		switch err := s.Store.RenameAccount(oldName, newName); {
+		switch err := s.Store.RenameAccount(userFrom(r).ID, oldName, newName); {
 		case errors.Is(err, store.ErrAccountExists):
 			http.Error(w, "аккаунт "+newName+" уже существует", http.StatusBadRequest)
 			return
@@ -181,7 +181,7 @@ func (s *Server) handleSetAccountOmega(w http.ResponseWriter, r *http.Request) {
 		}
 		*f.dst = v
 	}
-	if err := s.Store.SetAccountOmega(o); err != nil {
+	if err := s.Store.SetAccountOmega(userFrom(r).ID, o); err != nil {
 		httpError(w, "saving omega dates", err)
 		return
 	}

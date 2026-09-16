@@ -1,0 +1,76 @@
+{{define "content"}}
+<h1>Корпорация</h1>
+
+<style>
+  /* Строка члена корпорации: портрет, имя, линии и навыки — как
+     на сводных страницах империи, без собственных цветов. */
+  .csrow { display:flex; align-items:center; flex-wrap:wrap; gap:.6rem 1.2rem;
+           padding:.6rem 1rem; margin:.4rem 0; }
+  .csrow img { width:48px; height:48px; border-radius:6px; flex:none; }
+  .csname { flex:0 0 185px; min-width:0; }
+  .cslines { display:flex; gap:1.4rem; flex:none; }
+  .csskills { display:flex; flex-wrap:wrap; gap:.3rem 1rem; min-width:0; flex:1; }
+  .csskill { display:flex; align-items:center; gap:.4rem; font-size:.78rem; color:#9fb2ca; }
+  .csskill .nm { white-space:nowrap; }
+</style>
+
+{{if not .CorpGroups}}
+<p class="muted" style="margin-top:1.2rem;">Вы не CEO ни одной корпорации из кабинета.</p>
+{{else}}
+{{range .CorpGroups}}
+<h2 class="wsechead" style="margin-top:1.4rem;">{{.Corp.Name}}
+  <span class="cnt">{{len .Members}}</span></h2>
+
+{{if not .Members}}
+<div class="card">
+  <p class="muted" style="margin:0;">Пока никто из членов корпорации не делится данными.</p>
+  <p class="muted" style="margin:.5rem 0 0; font-size:.8rem;">Чтобы поделиться, член корпорации
+    открывает {{$.JoinURL}} и входит ссылкой «Войти с доступом только к производству».</p>
+</div>
+{{else}}
+{{range .Members}}
+<div class="card csrow">
+  <img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=64" alt="">
+  <div class="csname">
+    <p class="ell" style="margin:0;">{{.Name}}</p>
+  </div>
+  <div class="cslines">
+    {{if .Lines}}
+    <div>
+      <p class="klabel" style="margin:0;">Производство</p>
+      <p class="kval {{if eq .Lines.MfgBusy .Lines.MfgTotal}}pos{{else if .Lines.MfgBusy}}lvl{{else}}muted{{end}}"
+         style="margin:0;">{{.Lines.MfgBusy}}/{{.Lines.MfgTotal}}</p>
+    </div>
+    <div>
+      <p class="klabel" style="margin:0;">Исследования</p>
+      <p class="kval {{if eq .Lines.SciBusy .Lines.SciTotal}}pos{{else if .Lines.SciBusy}}lvl{{else}}muted{{end}}"
+         style="margin:0;">{{.Lines.SciBusy}}/{{.Lines.SciTotal}}</p>
+    </div>
+    {{else}}
+    <div>
+      <p class="klabel" style="margin:0;">Линии</p>
+      <p class="kval muted" style="margin:0;">—</p>
+    </div>
+    {{end}}
+  </div>
+  <div class="csskills">
+    {{if .Skills}}
+    {{range .Skills}}
+    <span class="csskill"><span class="nm">{{.Name}}</span>
+      <span class="sq">{{$lv := .Level}}{{range $l := seq 5}}<i class="{{if le $l $lv}}on{{end}}"></i>{{end}}</span></span>
+    {{end}}
+    {{else}}
+    <span class="muted" style="font-size:.78rem;">навыки не видны — у токена нет права</span>
+    {{end}}
+  </div>
+</div>
+{{end}}
+{{end}}
+{{end}}
+{{end}}
+
+<p class="muted" style="font-size:.7rem; margin:1.2rem 0 0;">
+  ESI не отдаёт руководству корпорации ни навыки её членов, ни их производственные линии —
+  здесь видно только то, чем человек согласился поделиться сам, входя в свой кабинет
+  с доступом только к производству. Согласие снимается в его настройках.</p>
+{{end}}

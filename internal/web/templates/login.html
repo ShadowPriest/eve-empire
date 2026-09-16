@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вход — EVE Empire</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; min-height: 100dvh;
+    display: flex; align-items: center; justify-content: center;
+    background: #0b0e14; color: #c9d4e3;
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+  .card {
+    width: min(92vw, 420px); padding: 2rem 2rem 1.6rem;
+    background: #0e1420; border: 1px solid #1b2436; border-radius: 10px;
+    text-align: center;
+  }
+  .word {
+    display: block; font-weight: 300; letter-spacing: .14em;
+    color: #e8eef7; font-size: 1.1rem; margin-bottom: 1.4rem;
+  }
+  .word > span { color: #4da3ff; }
+  h1 { font-size: 1.15rem; font-weight: 500; color: #e8eef7; margin: 0 0 .4rem; }
+  p.lead { font-size: .85rem; color: #7b8aa0; margin: 0 0 1.4rem; }
+  .btnlink {
+    display: inline-block; background: #1a2438; border: 1px solid #2a3a55;
+    border-radius: 6px; color: #c9d4e3; padding: .55rem 1.3rem;
+    font-size: .9rem; text-decoration: none;
+  }
+  .btnlink:hover { border-color: #4da3ff; color: #fff; }
+  /* Второй вход — для членов корпорации: тише основного и с одной
+     строкой о том, что именно получит сервис. */
+  .alt { margin: 1.3rem 0 0; padding-top: 1rem; border-top: 1px solid #1b2436; }
+  .alt a {
+    color: #7b8aa0; font-size: .82rem; text-decoration: none;
+    border-bottom: 1px dotted #3a4a66;
+  }
+  .alt a:hover { color: #c9d4e3; border-bottom-color: #4da3ff; }
+  .alt p { margin: .45rem 0 0; font-size: .74rem; color: #5f6d82; }
+  .deny {
+    background: #2a1a1f; border: 1px solid #5a2b33; border-radius: 6px;
+    color: #e8b9b9; font-size: .82rem; padding: .5rem .7rem;
+    margin: 0 0 1.2rem; text-align: left;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <span class="word">EVE <span>EMPIRE</span></span>
+    {{if .Message}}<p class="deny">{{.Message}}</p>{{end}}
+    <h1>Вход в кабинет</h1>
+    <p class="lead">Кабинет открывается персонажем: пароля нет, личность
+      подтверждает EVE Online.</p>
+    <p style="margin:0;"><a class="btnlink" href="{{.Href}}">Войти через EVE Online</a></p>
+    <div class="alt">
+      <a href="{{.IndustryHref}}">Войти с доступом только к производству</a>
+      <p>Сервис получит навыки, очередь обучения и производственные задания — и больше ничего.
+        Навыки и производственные линии этого персонажа будут видны руководству его
+        корпорации в этом сервисе.</p>
+    </div>
+  </div>
+</body>
+</html>

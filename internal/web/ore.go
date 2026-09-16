@@ -122,12 +122,12 @@ var refineKinds = []struct{ Key, Label string }{
 // refineSettings reads one kind's setup. Settings saved before the split
 // (plain "refine_char" & co) still apply to every kind, so nobody has to
 // set anything up twice after the update.
-func (s *Server) refineSettings(kind string) refineSet {
+func (s *Server) refineSettings(userID int64, kind string) refineSet {
 	get := func(name string) string {
-		if v := s.Store.Setting("refine_" + kind + "_" + name); v != "" {
+		if v := s.Store.UserSetting(userID, "refine_"+kind+"_"+name); v != "" {
 			return v
 		}
-		return s.Store.Setting("refine_" + name)
+		return s.Store.UserSetting(userID, "refine_"+name)
 	}
 	set := refineSet{Struct: get("struct"), Rig: get("rig"), Sec: get("sec")}
 	set.CharID, _ = strconv.ParseInt(get("char"), 10, 64)
@@ -145,10 +145,10 @@ func (s *Server) refineSettings(kind string) refineSet {
 
 // sameRefineSetup reports whether every kind is set up identically —
 // that is what the "одинаково для всех" box in the window starts as.
-func (s *Server) sameRefineSetup() bool {
-	first := s.refineSettings(refineKinds[0].Key)
+func (s *Server) sameRefineSetup(userID int64) bool {
+	first := s.refineSettings(userID, refineKinds[0].Key)
 	for _, k := range refineKinds[1:] {
-		if s.refineSettings(k.Key) != first {
+		if s.refineSettings(userID, k.Key) != first {
 			return false
 		}
 	}
@@ -178,7 +178,7 @@ func (s *Server) handleRefineSettings(w http.ResponseWriter, r *http.Request) {
 		for _, f := range []struct{ name, form string }{
 			{"char", "ch"}, {"struct", "struct"}, {"rig", "rig"}, {"sec", "sec"},
 		} {
-			if err := s.Store.SetSetting("refine_"+kind+"_"+f.name, r.FormValue(f.form)); err != nil {
+			if err := s.Store.SetUserSetting(userFrom(r).ID, "refine_"+kind+"_"+f.name, r.FormValue(f.form)); err != nil {
 				httpError(w, "сохранение настроек переработки", err)
 				return
 			}
@@ -289,11 +289,12 @@ var classicMineral = map[int64]bool{
 
 func (s *Server) handleOreTool(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
+	userID := userFrom(r).ID
 	q := r.URL.Query()
 
 	kind := q.Get("t")
@@ -318,7 +319,7 @@ func (s *Server) handleOreTool(w http.ResponseWriter, r *http.Request) {
 	yield := parseYield(q.Get("y"))
 
 	fams := s.SDE.Harvestables(kind)
-	chars := empireChars(data)
+	chars := empireCharsFor(data, "/tools/ore")
 	if len(fams) == 0 {
 		data["Kind"] = kind
 		data["Kinds"] = oreKinds
@@ -369,7 +370,7 @@ func (s *Server) handleOreTool(w http.ResponseWriter, r *http.Request) {
 	// yield is computed per family, because the ore-specific skill is
 	// per family too.
 	model := s.SDE.RefineryModel()
-	set := s.refineSettings(kind)
+	set := s.refineSettings(userID, kind)
 	var ref *refinery
 	if set.CharID != 0 {
 		for _, ch := range chars {
@@ -529,7 +530,7 @@ func (s *Server) handleOreTool(w http.ResponseWriter, r *http.Request) {
 	data["SetCharID"] = strconv.FormatInt(set.CharID, 10)
 	data["SetBase"] = pctText(model.Base(set.Struct, set.Rig, set.Sec) * 100)
 	data["SetWhere"] = model.Describe(set.Struct, set.Rig, set.Sec)
-	data["SameSetup"] = s.sameRefineSetup()
+	data["SameSetup"] = s.sameRefineSetup(userID)
 	data["BackURL"] = r.URL.RequestURI()
 	for _, k := range refineKinds {
 		if k.Key == kind {
@@ -543,7 +544,7 @@ func (s *Server) handleOreTool(w http.ResponseWriter, r *http.Request) {
 		if k.Key == kind {
 			continue
 		}
-		o := s.refineSettings(k.Key)
+		o := s.refineSettings(userID, k.Key)
 		who := "вручную"
 		for _, ch := range chars {
 			if ch.ID == o.CharID {
@@ -820,7 +821,7 @@ type watchDay struct {
 
 func (s *Server) handleMarketWatch(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return

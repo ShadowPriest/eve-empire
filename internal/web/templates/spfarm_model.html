@@ -40,14 +40,17 @@
               <img src="https://images.evetech.net/characters/{{.ID}}/portrait?size=64" alt="" loading="lazy"
                    style="width:44px; height:44px; border-radius:8px; border:1px solid #1b2436;">
             </label>
-            <div style="min-width:0; flex:1; padding-right:1.2rem;">
-              <p style="margin:0;"><b style="color:#e8eef7;">{{.Name}}</b>
+            <div style="min-width:0; flex:1;">
+              <p class="frow" style="margin:0; gap:.5rem; flex-wrap:nowrap; padding-right:1.6rem;">
+                <b style="color:#e8eef7; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{.Name}}</b>
+                <span class="muted" style="margin-left:auto; font-size:.72rem; white-space:nowrap;"
+                      title="всего SP · свободных (нераспределённых) SP">{{num .TotalSP}} SP · {{num .UnallocSP}} свободно</span></p>
+              <p style="margin:.3rem 0 0;">
                 {{if .Paused}}
                 <span class="rb warn" title="очередь навыков пуста или на паузе — скорость не считается">пауза</span>
                 {{else}}
-                <span class="rb{{if .InPool}} pos{{end}}" id="skillrb-{{.ID}}" title="зелёный — тренируемый навык из пула и идёт в прогноз">{{.Skill}} · {{sprate .Rate}}</span>
-                {{end}}
-                <span class="buy" id="offpool-{{.ID}}" style="font-size:.72rem;{{if or .Paused .InPool}} display:none;{{end}}">не из пула</span></p>
+                <span class="rb{{if .InPool}} pos{{else}} warn{{end}}" id="skillrb-{{.ID}}" title="зелёный — тренируемый навык из пула и идёт в прогноз; жёлтая рамка — навык не из пула">{{.Skill}} · {{sprate .Rate}}</span>
+                {{end}}</p>
               <p class="knote muted" style="margin-top:.3rem;">прогноз ≈ <b style="color:#b9c7da;" id="spyear-{{.ID}}">{{iskraw .SPYear}}</b> SP/год ·
                 пул: <span id="poolcnt-{{.ID}}">{{.PoolCount}}</span> навыков</p>
               <input type="hidden" name="pool-{{.ID}}" id="pool-{{.ID}}" value="{{.Pool}}">
@@ -213,9 +216,10 @@
     const sp = air + (rate > 0 && inPool ? rate * R.minutes : 0);
     card.dataset.spyear = Math.round(sp);
     const rb = document.getElementById('skillrb-' + id);
-    if (rb) rb.classList.toggle('pos', inPool);
-    const off = document.getElementById('offpool-' + id);
-    if (off) off.style.display = inPool ? 'none' : '';
+    if (rb) {
+      rb.classList.toggle('pos', inPool);
+      rb.classList.toggle('warn', !inPool);
+    }
     const spEl = document.getElementById('spyear-' + id);
     if (spEl) spEl.textContent = fmtNum(sp);
   }

@@ -1,108 +1,181 @@
-{{/* дата ПОД остатком дней, а не рядом: три колонки «дата + дни» в одну
-     строку шире карточки, и таблица вылезала за её край */}}
-{{define "omgcell"}}<td class="r nowrap">{{if .Raw}}{{if .Expired}}<b class="sev-err">истёк</b>{{else if eq .Class "err"}}<b class="sev-err">{{.Days}}д</b>{{else if eq .Class "warn"}}<b class="sev-warn">{{.Days}}д</b>{{else}}<b>{{.Days}}д</b>{{end}}<span class="muted" style="display:block;font-size:.68rem;">{{.Disp}}</span>{{else}}<span class="muted">—</span>{{end}}</td>{{end}}
-
 {{define "content"}}
 {{template "empiretabs" "summary"}}
 
-{{range .Errors}}<p class="err">{{.}}</p>{{end}}
 
-<div class="cardgrid">
+{{/* ── плитки: по одной на вкладку, клик ведёт на неё ── */}}
+<div class="card phead">
+  <div class="pheadstats sumtiles">
+    <a class="pstat pick" href="/wallets">
+      <p class="klabel">Кошельки</p>
+      <p class="kval isk">{{iskshort .GrandTotal}}</p>
+      <p class="knote muted">персонажи {{iskshort .CharTotal}} · корпорации {{iskshort .CorpTotal}}</p>
+    </a>
 
-  <!-- wallets: the two totals are the list, each unfolds its members -->
-  <div class="card">
-    <h2>Кошельки <a class="more" href="/wallets">подробно →</a></h2>
-    <table class="wtree">
-      <tr class="wgrp" data-wtoggle="chars">
-        <th><span class="tw">▸</span> Персонажи всего <span class="muted">{{len .CharWallets}}</span></th>
-        <th class="r isk">{{isk .CharTotal}}</th>
-      </tr>
-      {{range .CharWallets}}
-      <tr class="wsub" data-wgroup="chars" data-empire-char="{{.ID}}" hidden>
-        <td><a class="alink" href="/characters/{{.ID}}/wallet">{{.Name}}</a>{{if .Account}}
-          <span class="muted" style="font-size:.72rem;">· {{.Account}}</span>{{end}}</td>
-        <td class="r isk">{{isk .Wallet}}</td>
-      </tr>
-      {{end}}
+    <a class="pstat pick" href="/training">
+      <p class="klabel">Обучение</p>
+      <p class="kval {{if or .Idle .Paused}}neg{{else}}pos{{end}}">{{.Learning}}/{{len .Chars}}
+        <span class="muted" style="font-size:.8rem;">учатся</span></p>
+      <p class="knote muted">{{if .Idle}}<span class="sev-err">без очереди: {{.Idle}}</span>{{end}}{{if
+        and .Idle .Paused}} · {{end}}{{if .Paused}}<span class="sev-warn">на паузе: {{.Paused}}</span>{{end}}{{if
+        not (or .Idle .Paused)}}все альты в очереди{{end}}</p>
+    </a>
 
-      <tr class="wgrp" data-wtoggle="corps">
-        <th><span class="tw">▸</span> Корпорации всего <span class="muted">{{len .CorpRows}}</span></th>
-        <th class="r isk">{{isk .CorpTotal}}</th>
-      </tr>
-      {{range .CorpRows}}
-      <tr class="wsub" data-wgroup="corps" hidden>
-        <td><a class="alink" href="/corporations/{{.Corp.ID}}/wallets">{{.Corp.Name}}</a></td>
-        <td class="r">{{if .OK}}<span class="isk">{{isk .Total}}</span>{{else}}<span class="muted">{{.Note}}</span>{{end}}</td>
-      </tr>
-      {{end}}
+    <a class="pstat pick" href="/air">
+      <p class="klabel">AIR</p>
+      <p class="kval {{if lt .Air.Finals (len .Chars)}}lvl{{else}}pos{{end}}">{{.Air.Finals}}/{{len .Chars}}
+        <span class="muted" style="font-size:.8rem;">финал</span></p>
+      <p class="knote muted">{{num .Air.LiveTotal}} SP за месяц · сброс через
+        <b data-countdown="{{.Air.ResetAt.Format "2006-01-02T15:04:05Z07:00"}}">…</b></p>
+    </a>
 
-      <tr class="wtot"><th>Общий баланс</th><th class="r isk">{{isk .GrandTotal}}</th></tr>
-    </table>
+    <a class="pstat pick" href="/industry">
+      <p class="klabel">Производство</p>
+      <p class="kval {{if eq .IndBusy .IndTotal}}pos{{else if .IndBusy}}lvl{{else}}muted{{end}}">{{.IndBusy}}/{{.IndTotal}}
+        <span class="muted" style="font-size:.8rem;">линий занято</span></p>
+      <p class="knote muted">работ: {{len .Ind.Jobs}}{{if .IndReady}} · <span class="sev-warn">готово: {{.IndReady}}</span>{{end}}{{if
+        .IndPaused}} · пауза: {{.IndPaused}}{{end}} · запуск <span class="isk">{{iskshort .Ind.Cost}}</span></p>
+    </a>
+
+    {{$p := .Pl}}
+    <a class="pstat pick" href="/planets">
+      <p class="klabel">Планеты</p>
+      <p class="kval {{if lt $p.ExtRun $p.ExtAll}}neg{{else}}pos{{end}}">буры {{$p.ExtRun}}/{{$p.ExtAll}}</p>
+      <p class="knote muted">заводы {{$p.FacRun}}/{{$p.FacAll}} · колоний {{$p.Colonies}} из {{$p.Allowed}}{{if
+        $p.StorFull}} · <span class="sev-err">склады на пределе: {{$p.StorFull}}</span>{{end}}</p>
+    </a>
+
+    <a class="pstat pick" href="/mining">
+      <p class="klabel">Добыча</p>
+      <p class="kval {{if .Mine.ISK}}isk{{else}}muted{{end}}">{{if .Mine.ISK}}{{iskshort .Mine.ISK}}{{else}}—{{end}}</p>
+      <p class="knote muted">{{if .Mine.Chars}}за 30 дней · копали: {{.Mine.Chars}}{{else}}за 30 дней никто не копал{{end}}</p>
+    </a>
+
+    {{$s := .Str}}
+    <a class="pstat pick" href="/structures">
+      <p class="klabel">Структуры</p>
+      <p class="kval {{if $s.LowPower}}neg{{else if $s.FuelWeek}}sev-warn{{else if $s.Count}}pos{{else}}muted{{end}}">
+        {{if $s.LowPower}}без топлива: {{$s.LowPower}}{{else if $s.NextFuel}}топливо {{dur ($s.NextFuel.Sub $.Now)}}{{else}}—{{end}}</p>
+      <p class="knote muted">структур: {{$s.Count}}{{if $s.Reinforced}} · <span class="sev-err">реинфорс: {{$s.Reinforced}}</span>{{end}}{{if
+        $s.EventsErr}} · <span class="sev-err">атак за 7 дней: {{$s.EventsErr}}</span>{{end}}</p>
+    </a>
+
+    {{$a := .Acc}}
+    <a class="pstat pick" href="/accounting">
+      <p class="klabel">Учёт</p>
+      <p class="kval {{if $a.Opened}}isk{{else}}muted{{end}}">{{if $a.Opened}}{{iskshort $a.Att.StockCost}}{{else}}—{{end}}</p>
+      <p class="knote muted">{{if $a.Opened}}склад по себестоимости · партий {{num $a.Att.Lots}}{{if
+        $a.ReconDiffs}} · <span class="sev-warn">расходится: {{$a.ReconDiffs}}</span>{{end}}{{else}}реестр не открыт{{end}}</p>
+    </a>
   </div>
+</div>
 
-  <!-- training: nearest finish first -->
+{{/* ── лента внимания и хронология ── */}}
+<div class="sumgrid">
   <div class="card">
-    <h2>Обучение <a class="more" href="/training">подробно →</a></h2>
-    <table class="trtab">
-      {{range .Training}}
-      <tr class="trrow{{if .QueueSkillID}} qactive{{end}}" data-empire-char="{{.ID}}">
-        <td class="who"><a class="alink" href="/characters/{{.ID}}/skills">{{.Name}}</a></td>
-        {{if .QueueSkillID}}
-        <td class="sqc">{{squares .QueueTrained .QueueLevel}}</td>
-        <td class="ell" title="{{.QueueSkill}} {{roman .QueueLevel}}">{{.QueueSkill}}</td>
-        <td class="lvc"><b class="lvl">{{roman .QueueLevel}}</b></td>
-        <td class="r nowrap tmc"><b data-countdown="{{.QueueEnds.Format "2006-01-02T15:04:05Z07:00"}}">…</b></td>
-        {{else if .QueuePaused}}
-        <td class="sqc">{{squares 0 0}}</td>
-        <td colspan="3"><span class="sev-warn">очередь на паузе</span></td>
-        {{else}}
-        <td class="sqc">{{squares 0 0}}</td>
-        <td colspan="3"><span class="sev-err">очередь пуста!</span></td>
-        {{end}}
-      </tr>
-      {{end}}
-    </table>
-    <p class="knote muted" style="margin-top:.7rem;">
-      {{if .IdleQueues}}<span class="sev-err">не обучаются: {{.IdleQueues}}</span>{{else}}все альты учатся{{end}}</p>
-  </div>
-
-  <!-- omega / MCT: hand-entered dates, rows in sidebar order -->
-  <div class="card">
-    <h2>Омега и учебные места <a class="more" href="/settings">изменить →</a></h2>
-    <table>
-      <tr><th>Аккаунт</th><th class="r">Омега</th><th class="r">Уч. 1</th><th class="r">Уч. 2</th></tr>
-      {{range .Groups}}{{if .Key}}
+    <h2>Требует внимания
+      <span class="sumcnt">{{if .Alerts}}{{if .AlertsErr}}<b class="sev-err">{{.AlertsErr}}</b>{{end}}{{if
+        and .AlertsErr .AlertsWarn}} · {{end}}{{if .AlertsWarn}}<b class="sev-warn">{{.AlertsWarn}}</b>{{end}}{{else}}<b class="pos">0</b>{{end}}</span></h2>
+    {{if .Alerts}}
+    <table class="alerts sumtab">
+      {{range .Alerts}}
       <tr>
-        <td>{{.Name}}</td>
-        {{template "omgcell" .Omega.Omega}}
-        {{template "omgcell" .Omega.MCT1}}
-        {{template "omgcell" .Omega.MCT2}}
-      </tr>
-      {{end}}{{end}}
-    </table>
-  </div>
-
-  <!-- industry lines -->
-  <div class="card">
-    <h2>Линии производства <a class="more" href="/industry">подробно →</a></h2>
-    <table>
-      <tr><th>Персонаж</th><th class="r">Произв.</th><th class="r">Наука</th><th class="r">Реакции</th></tr>
-      {{range .Chars}}
-      <tr data-empire-char="{{.ID}}">
-        <td><a class="alink" href="/characters/{{.ID}}/industry">{{.Name}}</a></td>
-        <td class="lines r"><i class="mfg">{{.Lines.MfgBusy}}/{{.Lines.MfgTotal}}</i></td>
-        <td class="lines r"><i class="sci">{{.Lines.SciBusy}}/{{.Lines.SciTotal}}</i></td>
-        <td class="lines r"><i class="rea">{{.Lines.ReaBusy}}/{{.Lines.ReaTotal}}</i></td>
+        <td><span class="albadge {{.Level}}"></span></td>
+        <td class="who">{{if .WhoHref}}<a class="alink" href="{{.WhoHref}}">{{.Who}}</a>{{else}}{{.Who}}{{end}}</td>
+        <td><span class="sumtag">{{.Tag}}</span> <span class="sev-{{.Level}}">{{.Text}}</span>{{if .Note}} <span class="muted">{{.Note}}</span>{{end}}</td>
+        <td class="src"><a href="{{.SrcHref}}">{{.Src}} →</a></td>
       </tr>
       {{end}}
-      {{$l := .LineTotals}}
-      <tr class="wtot">
-        <th>Всего</th>
-        <th class="lines r"><i class="mfg">{{$l.MfgBusy}}/{{$l.MfgTotal}}</i></th>
-        <th class="lines r"><i class="sci">{{$l.SciBusy}}/{{$l.SciTotal}}</i></th>
-        <th class="lines r"><i class="rea">{{$l.ReaBusy}}/{{$l.ReaTotal}}</i></th>
-      </tr>
     </table>
+    {{else}}
+    <p class="pos" style="margin:.4rem 0 0;">Всё в порядке: все учатся, буры копают, топливо есть, работы забраны.</p>
+    {{end}}
   </div>
+
+  <div class="card">
+    <h2>Ближайшие события <span class="sumcnt">{{len .Events}}{{if .EventsMore}} из {{add (len .Events) .EventsMore}}{{end}}</span></h2>
+    {{if .Events}}
+    <table class="alerts sumtab">
+      {{range .Events}}
+      <tr>
+        <td class="tmc"><b data-countdown="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">…</b></td>
+        <td class="who">{{if .WhoHref}}<a class="alink" href="{{.WhoHref}}">{{.Who}}</a>{{else}}{{.Who}}{{end}}</td>
+        <td><span class="sumtag">{{.Kind}}</span> {{.Text}}</td>
+        <td class="src muted">{{.At.Format "02.01 15:04"}}</td>
+      </tr>
+      {{end}}
+    </table>
+    {{if .EventsMore}}<p class="knote muted">…и ещё {{.EventsMore}} позже — подробности на вкладках</p>{{end}}
+    {{else}}
+    <p class="muted" style="margin:.4rem 0 0;">Ничего запланированного: ни обучения, ни работ, ни программ буров.</p>
+    {{end}}
+  </div>
+</div>
+
+{{/* ── матрица персонажей: свёрнута, состояние помнится в браузере ── */}}
+<div class="card" id="summat">
+  <h2 class="sumtog" id="summattog"><span class="tw">▸</span> По персонажам <span class="sumcnt">{{len .Chars}}</span></h2>
+  <table class="summat" id="summattab" hidden>
+    <tr>
+      <th>Персонаж</th><th class="r">Кошелёк</th><th colspan="3">Обучение</th>
+      <th class="r" title="дней AIR в текущем месяце">AIR</th>
+      <th class="r" title="линии: производство | наука | реакции (занято/всего)">Линии</th>
+      <th class="r" title="колонии из доступных">Планеты</th>
+      <th class="r" title="по цене дня добычи">Добыча 30д</th>
+    </tr>
+    {{range .SumGroups}}
+    <tr class="sumacct"><th colspan="9">{{.Name}}{{if .Omega.Any}} <span class="omg {{.Omega.Class}}"
+      title="{{.Omega.Title}}">{{.Omega.Label}}</span>{{end}}</th></tr>
+    {{range .Chars}}
+    <tr data-empire-char="{{.ID}}">
+      <td class="who"><a class="alink" href="/characters/{{.ID}}">{{.Name}}</a></td>
+      <td class="r isk nowrap">{{iskshort .Wallet}}</td>
+      {{if .QueueSkillID}}
+      <td class="sqc">{{squares .QueueTrained .QueueLevel}}</td>
+      <td class="ell" title="{{.QueueSkill}} {{roman .QueueLevel}}">{{.QueueSkill}} <b class="lvl">{{roman .QueueLevel}}</b></td>
+      <td class="r nowrap tmc"><b data-countdown="{{.QueueEnds.Format "2006-01-02T15:04:05Z07:00"}}">…</b></td>
+      {{else if .QueuePaused}}
+      <td class="sqc">{{squares 0 0}}</td>
+      <td colspan="2"><span class="sev-warn">очередь на паузе</span></td>
+      {{else}}
+      <td class="sqc">{{squares 0 0}}</td>
+      <td colspan="2"><span class="sev-err">очередь пуста!</span></td>
+      {{end}}
+      <td class="r nowrap {{if .AirFinal}}pos{{end}}">{{.AirDays}}/30</td>
+      <td class="lines r nowrap"><i class="mfg">{{.Lines.MfgBusy}}/{{.Lines.MfgTotal}}</i><span class="sep">|</span><i class="sci">{{.Lines.SciBusy}}/{{.Lines.SciTotal}}</i><span class="sep">|</span><i class="rea">{{.Lines.ReaBusy}}/{{.Lines.ReaTotal}}</i>{{if
+        .Ready}} <span class="sev-warn" title="готовых работ">✓{{.Ready}}</span>{{end}}</td>
+      <td class="r nowrap">{{if .PlanetsHas}}{{.Planets}}/{{.PlanetsAllowed}}{{if .PlanetStops}} <span class="sev-err" title="колоний, где что-то встало">стоит {{.PlanetStops}}</span>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="r nowrap">{{if .Mining30}}<span class="isk">{{iskshort .Mining30}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+    </tr>
+    {{end}}
+    {{end}}
+    <tr class="wtot">
+      <th>Всего</th>
+      <th class="r isk nowrap">{{iskshort .CharTotal}}</th>
+      <th colspan="3">учатся {{.Learning}} из {{len .Chars}}</th>
+      <th class="r nowrap">финал {{.Air.Finals}}</th>
+      {{$l := .Ind.Lines}}
+      <th class="lines r nowrap"><i class="mfg">{{$l.MfgBusy}}/{{$l.MfgTotal}}</i><span class="sep">|</span><i class="sci">{{$l.SciBusy}}/{{$l.SciTotal}}</i><span class="sep">|</span><i class="rea">{{$l.ReaBusy}}/{{$l.ReaTotal}}</i></th>
+      <th class="r nowrap">{{$p.Colonies}}/{{$p.Allowed}}</th>
+      <th class="r isk nowrap">{{if .Mine.ISK}}{{iskshort .Mine.ISK}}{{else}}—{{end}}</th>
+    </tr>
+  </table>
+  <script>
+  (function () {
+    /* the block is re-rendered by the live swap; the script runs again
+       and restores the remembered state */
+    const tog = document.getElementById('summattog'), tab = document.getElementById('summattab');
+    if (!tog || !tab) return;
+    const key = 'eeSummat';
+    const apply = open => { tab.hidden = !open; tog.classList.toggle('open', open); };
+    let open = false;
+    try { open = localStorage.getItem(key) === '1'; } catch (e) {}
+    apply(open);
+    tog.addEventListener('click', () => {
+      open = tab.hidden;
+      apply(open);
+      try { localStorage.setItem(key, open ? '1' : '0'); } catch (e) {}
+    });
+  })();
+  </script>
 </div>
 {{end}}

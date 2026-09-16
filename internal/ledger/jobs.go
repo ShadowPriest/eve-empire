@@ -174,7 +174,7 @@ func (b *Builder) postJobStart(j store.JobRow, recipe sde.Recipe, sdeDB *sde.DB,
 		MktTotal:  unitMkt * float64(out),
 	})
 
-	return b.Store.PostDoc(store.Doc{
+	return b.Store.PostDoc(b.UserID, store.Doc{
 		Kind: kindOf(j.ActivityID), OwnerID: j.OwnerID, At: at,
 		Src: "esi:job", SrcID: key,
 		Note: fmt.Sprintf("%s ×%d, ME %d, бонус корпуса %.2f",
@@ -200,7 +200,7 @@ func (b *Builder) postJobDelivery(j store.JobRow, sdeDB *sde.DB, key string) err
 	if at.IsZero() {
 		at = j.EndDate
 	}
-	_, err := b.Store.PostDoc(store.Doc{
+	_, err := b.Store.PostDoc(b.UserID, store.Doc{
 		Kind: "delivery", OwnerID: j.OwnerID, At: at,
 		Src: "esi:job-deliver", SrcID: key,
 		Note: fmt.Sprintf("выдача: %s ×%d", recipe.ProductName, runs),

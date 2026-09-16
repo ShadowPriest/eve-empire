@@ -129,19 +129,44 @@ func notifPct(re *regexp.Regexp, text string) (float64, bool) {
 
 func (s *Server) handleEmpireStructures(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	chars := empireChars(data)
+	chars := empireCharsFor(data, "/structures")
 	if len(chars) == 0 {
 		s.render(w, "welcome", data, stale)
 		return
 	}
 	corps, _ := data["Corporations"].([]corpEntry)
 	var errs errList
+	ov := s.structuresOverview(ec, chars, corps, time.Now(), &errs)
+	data["Corps"] = ov.Corps
+	data["Events"] = ov.Events
+	data["Totals"] = ov.Totals
+	data["Errors"] = errs.list
+	s.render(w, "empire_structures", data, stale)
+}
 
+// structTotals are the headline numbers of the structures tab.
+type structTotals struct {
+	Count, LowPower, Reinforced, FuelWeek int
+	NextFuel                              *time.Time
+	EventsErr                             int // attacks and losses in the last 7 days
+}
+
+// structuresOverview is everything the structures tab shows; the
+// summary page reads the same totals.
+type structuresOverview struct {
+	Corps  []structCorpView
+	Events []structEventView // newest first
+	Totals structTotals
+}
+
+// structuresOverview reads the structure list of every corporation and
+// the structure notifications of every character.
+func (s *Server) structuresOverview(ec *esi.Client, chars []sideChar, corps []corpEntry, now time.Time, errs *errList) structuresOverview {
 	// Corp membership: the Station Manager role can live on any alt of
 	// the corp, so every member is a candidate token.
 	corpChars := map[int64][]int64{}
@@ -217,7 +242,6 @@ func (s *Server) handleEmpireStructures(w http.ResponseWriter, r *http.Request) 
 	}
 	wg.Wait()
 
-	now := time.Now()
 	structNames := map[int64]string{} // structure id -> name (for events)
 	var systemIDs []int64
 	for i := range corps {
@@ -282,11 +306,7 @@ func (s *Server) handleEmpireStructures(w http.ResponseWriter, r *http.Request) 
 	names := ec.Names(append(systemIDs, aggrIDs...))
 
 	// ── decode structures ──
-	totals := struct {
-		Count, LowPower, Reinforced, FuelWeek int
-		NextFuel                              *time.Time
-		EventsErr                             int
-	}{}
+	var totals structTotals
 	for i := range corps {
 		for _, st := range rawByCorp[i] {
 			sv := structView{
@@ -384,9 +404,5 @@ func (s *Server) handleEmpireStructures(w http.ResponseWriter, r *http.Request) 
 		evViews = append(evViews, v)
 	}
 
-	data["Corps"] = views
-	data["Events"] = evViews
-	data["Totals"] = totals
-	data["Errors"] = errs.list
-	s.render(w, "empire_structures", data, stale)
+	return structuresOverview{Corps: views, Events: evViews, Totals: totals}
 }

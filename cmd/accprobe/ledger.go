@@ -15,7 +15,7 @@ import (
 
 // runLedger builds the ledger from collected history and prints the
 // stage-1 reports. A dev helper: the same calls sit behind the page.
-func runLedger(priceSource string, report bool) {
+func runLedger(userID int64, priceSource string, report bool) {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -26,13 +26,13 @@ func runLedger(priceSource string, report bool) {
 	}
 	defer st.Close()
 	ec := esi.New(sso.New(cfg.ClientID, cfg.ClientSecret, cfg.CallbackURL, cfg.Scopes, cfg.UserAgent), st, cfg.UserAgent)
-	ec.SetLanguage(st.Setting("language"))
+	ec.SetLanguage(st.AdminSetting("language"))
 
 	if priceSource != "" {
 		started := time.Now()
 		sdeDB := sde.Open(cfg.SDEPath)
 		defer sdeDB.Close()
-		res, err := ledger.New(st, ec).WithSDE(sdeDB).BuildAll(priceSource)
+		res, err := ledger.New(st, ec, userID).WithSDE(sdeDB).BuildAll(priceSource)
 		if err != nil {
 			log.Fatalf("сборка реестра: %v", err)
 		}
@@ -161,7 +161,7 @@ func runRecon() {
 	}
 	defer st.Close()
 	ec := esi.New(sso.New(cfg.ClientID, cfg.ClientSecret, cfg.CallbackURL, cfg.Scopes, cfg.UserAgent), st, cfg.UserAgent)
-	ec.SetLanguage(st.Setting("language"))
+	ec.SetLanguage(st.AdminSetting("language"))
 
 	sum, err := st.Reconcile()
 	if err != nil {

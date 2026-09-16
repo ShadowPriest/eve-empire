@@ -67,18 +67,18 @@ func defaultFarmParams() farmParams {
 
 // packageYear — PLEX в год на аккаунт: выбранное предложение магазина
 // EVE, нормализованное к году, или запасное значение из параметров.
-func (s *Server) packageYear(p farmParams) (float64, string) {
+func (s *Server) packageYear(userID int64, p farmParams) (float64, string) {
 	if p.OfferID != 0 {
-		if o, err := s.Store.FarmOffer(p.OfferID); err == nil {
+		if o, err := s.Store.FarmOffer(userID, p.OfferID); err == nil {
 			return o.PlexPerYear(), o.Name
 		}
 	}
 	return p.PackagePLEX, ""
 }
 
-func (s *Server) farmParams() farmParams {
+func (s *Server) farmParams(userID int64) farmParams {
 	p := defaultFarmParams()
-	if raw := s.Store.Setting("spfarm_params"); raw != "" {
+	if raw := s.Store.UserSetting(userID, "spfarm_params"); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &p)
 	}
 	if p.Accounts < 1 {
@@ -306,16 +306,18 @@ type farmCharView struct {
 	Paused    bool
 	AirSP     float64 // вклад AIR (пока 0 — заготовка под сущность AIR)
 	SPYear    float64 // прогноз: тренировка + AirSP
+	TotalSP   int64   // всего SP у персонажа
+	UnallocSP int64   // из них свободных (нераспределённых)
 }
 
 // farmInputsFromRoster собирает вводные с живого ростера. Возвращает
 // ok=false, когда ростер пуст — тогда работают запасные параметры.
-func (s *Server) farmInputsFromRoster(ec *esi.Client, p farmParams, packageYear float64) (farmInputs, bool) {
-	farmChars, err := s.Store.FarmChars()
+func (s *Server) farmInputsFromRoster(userID int64, ec *esi.Client, p farmParams, packageYear float64) (farmInputs, bool) {
+	farmChars, err := s.Store.FarmChars(userID)
 	if err != nil || len(farmChars) == 0 {
 		return farmInputs{}, false
 	}
-	farmAccts, _ := s.Store.FarmAccounts()
+	farmAccts, _ := s.Store.FarmAccounts(userID)
 
 	type res struct {
 		id    int64
@@ -443,12 +445,13 @@ func mergedSeries(db []store.FarmDay, hist esi.PriceSeries) esi.PriceSeries {
 
 func (s *Server) handleSPFarm(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	p := s.farmParams()
+	userID := userFrom(r).ID
+	p := s.farmParams(userID)
 
 	days := 365
 	if d, err := strconv.Atoi(r.URL.Query().Get("d")); err == nil && d >= 14 && d <= 3650 {
@@ -491,8 +494,8 @@ func (s *Server) handleSPFarm(w http.ResponseWriter, r *http.Request) {
 	// история копится и на копии с COLLECTOR=off.
 	s.maybeSnapFarm(goods)
 
-	pkgYear, _ := s.packageYear(p)
-	in, live := s.farmInputsFromRoster(ec, p, pkgYear)
+	pkgYear, _ := s.packageYear(userID, p)
+	in, live := s.farmInputsFromRoster(userID, ec, p, pkgYear)
 	if !live {
 		in = farmInputs{
 			SPTotal:    p.spPerAccount() * float64(p.Accounts),
@@ -569,7 +572,7 @@ func (s *Server) handleSPFarm(w http.ResponseWriter, r *http.Request) {
 	data["Goods"] = goods
 	data["ProfitChart"] = profitSVG
 	data["ProfitNote"] = profitNote
-	data["FarmStats"] = s.farmStats(ec)
+	data["FarmStats"] = s.farmStats(userID, ec)
 	data["Year"] = time.Now().UTC().Year()
 	data["Days"] = days
 	data["DayOptions"] = []int{90, 365, 730}
@@ -595,12 +598,12 @@ type farmStatRow struct {
 // farmStats собирает статистику для выбранных персонажей фермы с
 // настроенным пулом: выучено SP из пула (полный скилл-лист ESI) и AIR
 // за текущий год (закрытые месяцы + текущий прогресс).
-func (s *Server) farmStats(ec *esi.Client) []farmStatRow {
-	farmChars, err := s.Store.FarmChars()
+func (s *Server) farmStats(userID int64, ec *esi.Client) []farmStatRow {
+	farmChars, err := s.Store.FarmChars(userID)
 	if err != nil || len(farmChars) == 0 {
 		return nil
 	}
-	chars, err := s.Store.Characters()
+	chars, err := s.Store.Characters(userID)
 	if err != nil {
 		return nil
 	}
@@ -679,15 +682,16 @@ type modelAccountView struct {
 // вкладки SP-фермы.
 func (s *Server) handleSPFarmModel(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	p := s.farmParams()
+	userID := userFrom(r).ID
+	p := s.farmParams(userID)
 
-	farmAccts, _ := s.Store.FarmAccounts()
-	farmChars, _ := s.Store.FarmChars()
+	farmAccts, _ := s.Store.FarmAccounts(userID)
+	farmChars, _ := s.Store.FarmChars(userID)
 
 	// Живые скорости: очередь навыков каждого персонажа (кэш ESI уже
 	// прогрет сайдбаром, так что это дёшево).
@@ -710,8 +714,13 @@ func (s *Server) handleSPFarmModel(w http.ResponseWriter, r *http.Request) {
 				defer wg.Done()
 				queue, _ := ec.SkillQueue(id)
 				skill, rate := queueRate(queue, now)
+				var totalSP, unallocSP int64
+				if sheet, err := ec.Skills(id); err == nil && sheet != nil {
+					totalSP, unallocSP = sheet.TotalSP, sheet.UnallocatedSP
+				}
 				mu.Lock()
 				cv.Skill, cv.Rate = skill, rate
+				cv.TotalSP, cv.UnallocSP = totalSP, unallocSP
 				cv.Paused = rate == 0
 				cv.InPool = poolHas(cv.Pool, skill)
 				cv.AirSP = p.charAirSP(id)
@@ -741,11 +750,11 @@ func (s *Server) handleSPFarmModel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	offers, _ := s.Store.FarmOffers()
-	pkgYear, pkgName := s.packageYear(p)
+	offers, _ := s.Store.FarmOffers(userID)
+	pkgYear, pkgName := s.packageYear(userID, p)
 
 	// Планы прокачки — заготовки для модалки пула навыков.
-	plans, _ := s.Store.FarmPlans()
+	plans, _ := s.Store.FarmPlans(userID)
 	plansJSON, _ := json.Marshal(plans)
 	data["PlansJSON"] = template.JS(plansJSON)
 
@@ -776,7 +785,7 @@ func (s *Server) handleSPFarmRoster(w http.ResponseWriter, r *http.Request) {
 		}
 		chars[id] = strings.TrimSpace(r.FormValue(fmt.Sprintf("pool-%d", id)))
 	}
-	if err := s.Store.SetFarmRoster(r.Form["acct"], chars); err != nil {
+	if err := s.Store.SetFarmRoster(userFrom(r).ID, r.Form["acct"], chars); err != nil {
 		httpError(w, "saving farm roster", err)
 		return
 	}
@@ -794,7 +803,7 @@ func (s *Server) handleSPFarmPlanAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "нужны название и список навыков", http.StatusBadRequest)
 		return
 	}
-	id, err := s.Store.AddFarmPlan(name, body)
+	id, err := s.Store.AddFarmPlan(userFrom(r).ID, name, body)
 	if err != nil {
 		httpError(w, "saving plan", err)
 		return
@@ -809,7 +818,7 @@ func (s *Server) handleSPFarmPlanDelete(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "bad id", http.StatusBadRequest)
 		return
 	}
-	if err := s.Store.DeleteFarmPlan(id); err != nil {
+	if err := s.Store.DeleteFarmPlan(userFrom(r).ID, id); err != nil {
 		httpError(w, "deleting plan", err)
 		return
 	}
@@ -829,7 +838,7 @@ func (s *Server) handleSPFarmOfferAdd(w http.ResponseWriter, r *http.Request) {
 	if err2 != nil || months <= 0 {
 		months = 12
 	}
-	if err := s.Store.AddFarmOffer(store.FarmOffer{
+	if err := s.Store.AddFarmOffer(userFrom(r).ID, store.FarmOffer{
 		Name: name, Plex: plex, Months: int(months),
 	}); err != nil {
 		httpError(w, "saving offer", err)
@@ -844,15 +853,16 @@ func (s *Server) handleSPFarmOfferDelete(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "bad id", http.StatusBadRequest)
 		return
 	}
-	if err := s.Store.DeleteFarmOffer(id); err != nil {
+	userID := userFrom(r).ID
+	if err := s.Store.DeleteFarmOffer(userID, id); err != nil {
 		httpError(w, "deleting offer", err)
 		return
 	}
 	// Удалили выбранное — модель откатывается на запасное значение.
-	if p := s.farmParams(); p.OfferID == id {
+	if p := s.farmParams(userID); p.OfferID == id {
 		p.OfferID = 0
 		raw, _ := json.Marshal(p)
-		_ = s.Store.SetSetting("spfarm_params", string(raw))
+		_ = s.Store.SetUserSetting(userID, "spfarm_params", string(raw))
 	}
 	farmRedirect(w, r, "/tools/spfarm/model", "")
 }
@@ -865,10 +875,11 @@ func (s *Server) handleSPFarmOfferSelect(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "bad id", http.StatusBadRequest)
 		return
 	}
-	p := s.farmParams()
+	userID := userFrom(r).ID
+	p := s.farmParams(userID)
 	p.OfferID = id
 	raw, _ := json.Marshal(p)
-	if err := s.Store.SetSetting("spfarm_params", string(raw)); err != nil {
+	if err := s.Store.SetUserSetting(userID, "spfarm_params", string(raw)); err != nil {
 		httpError(w, "saving farm params", err)
 		return
 	}
@@ -879,19 +890,20 @@ func (s *Server) handleSPFarmOfferSelect(w http.ResponseWriter, r *http.Request)
 // инструментом. Цена PLEX нужна для сводки «сейчас / против текущей».
 func (s *Server) handlePlexVault(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
-	p := s.farmParams()
+	userID := userFrom(r).ID
+	p := s.farmParams(userID)
 
 	var plexSt esi.OrderStats
 	if st, err := ec.RegionOrderStats(esi.RegionPLEX, esi.TypePLEX); err == nil {
 		plexSt = st
 	}
 
-	buys, err := s.Store.PlexPurchases()
+	buys, err := s.Store.PlexPurchases(userID)
 	if err != nil {
 		httpError(w, "loading purchases", err)
 		return
@@ -1222,7 +1234,8 @@ func farmRedirect(w http.ResponseWriter, r *http.Request, dest, errMsg string) {
 }
 
 func (s *Server) handleSPFarmParams(w http.ResponseWriter, r *http.Request) {
-	p := s.farmParams()
+	userID := userFrom(r).ID
+	p := s.farmParams(userID)
 	var err error
 	num := func(field string, dst *float64) {
 		if err != nil {
@@ -1244,7 +1257,7 @@ func (s *Server) handleSPFarmParams(w http.ResponseWriter, r *http.Request) {
 	p.UseAIR = r.FormValue("use_air") == "1"
 
 	raw, _ := json.Marshal(p)
-	if err := s.Store.SetSetting("spfarm_params", string(raw)); err != nil {
+	if err := s.Store.SetUserSetting(userID, "spfarm_params", string(raw)); err != nil {
 		httpError(w, "saving farm params", err)
 		return
 	}
@@ -1260,7 +1273,8 @@ func (s *Server) handleSPFarmSide(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad side", http.StatusBadRequest)
 		return
 	}
-	p := s.farmParams()
+	userID := userFrom(r).ID
+	p := s.farmParams(userID)
 	switch r.FormValue("good") {
 	case "plex":
 		p.PlexSide = side
@@ -1273,7 +1287,7 @@ func (s *Server) handleSPFarmSide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw, _ := json.Marshal(p)
-	if err := s.Store.SetSetting("spfarm_params", string(raw)); err != nil {
+	if err := s.Store.SetUserSetting(userID, "spfarm_params", string(raw)); err != nil {
 		httpError(w, "saving farm params", err)
 		return
 	}
@@ -1299,7 +1313,7 @@ func (s *Server) handleSPFarmBuy(w http.ResponseWriter, r *http.Request) {
 		farmRedirect(w, r, "/tools/plex", "цена: ISK за штуку")
 		return
 	}
-	if err := s.Store.AddPlexPurchase(store.PlexPurchase{
+	if err := s.Store.AddPlexPurchase(userFrom(r).ID, store.PlexPurchase{
 		Day: day, Qty: int64(qty), Price: price,
 		Note: strings.TrimSpace(r.FormValue("note")),
 	}); err != nil {
@@ -1315,7 +1329,7 @@ func (s *Server) handleSPFarmBuyDelete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad id", http.StatusBadRequest)
 		return
 	}
-	if err := s.Store.DeletePlexPurchase(id); err != nil {
+	if err := s.Store.DeletePlexPurchase(userFrom(r).ID, id); err != nil {
 		httpError(w, "deleting purchase", err)
 		return
 	}

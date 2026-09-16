@@ -126,7 +126,7 @@ func (b *Builder) PostTransfer(p Proposal) error {
 	at := time.Now()
 	from := store.PlaceKey{OwnerID: p.FromOwner, LocationID: p.FromLocation, Flag: "Hangar"}
 	to := store.PlaceKey{OwnerID: p.ToOwner, LocationID: p.ToLocation, Flag: "Hangar"}
-	_, err := b.Store.PostDoc(store.Doc{
+	_, err := b.Store.PostDoc(b.UserID, store.Doc{
 		Kind: "transfer", OwnerID: p.FromOwner, At: at,
 		Src: "manual", SrcID: manualID("transfer"),
 		Note: "перемещение по сверке",
@@ -151,7 +151,7 @@ func (b *Builder) PostReceipt(owner, location, typeID, qty int64,
 		kind = "estimate"
 	}
 	at := time.Now()
-	_, err := b.Store.PostDoc(store.Doc{
+	_, err := b.Store.PostDoc(b.UserID, store.Doc{
 		Kind: "receipt", OwnerID: owner, At: at,
 		Src: "manual", SrcID: manualID("receipt"),
 		Note: "приход: " + source,
@@ -170,7 +170,7 @@ func (b *Builder) PostReceipt(owner, location, typeID, qty int64,
 // to loss, which is the whole difference between a write-off and a sale.
 func (b *Builder) PostWriteOff(owner, location, typeID, qty int64, reason string) error {
 	at := time.Now()
-	_, err := b.Store.PostDoc(store.Doc{
+	_, err := b.Store.PostDoc(b.UserID, store.Doc{
 		Kind: "writeoff", OwnerID: owner, At: at,
 		Src: "manual", SrcID: manualID("writeoff"),
 		Note: "списание: " + reason,

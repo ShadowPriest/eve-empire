@@ -278,6 +278,13 @@ func (r *Refresher) load() {
 		if _, ok := r.entries[m.URL]; ok {
 			continue
 		}
+		// Записи старого формата: корпоративная ручка, добытая токеном,
+		// но ключ ещё без персонажа (client.go, cacheKey). Читать их
+		// больше никто не будет, обновлять — лишний трафик; пусть
+		// протухнут.
+		if m.CharID != 0 && cacheKey(m.CharID, m.URL) != m.URL {
+			continue
+		}
 		e := &entry{
 			url: m.URL, charID: m.CharID, compat: m.Compat, kind: kindOf(m.URL),
 			expires: m.Expires, ttl: m.Expires.Sub(m.Fetched),

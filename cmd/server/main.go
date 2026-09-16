@@ -35,7 +35,10 @@ func main() {
 
 	ssoClient := sso.New(cfg.ClientID, cfg.ClientSecret, cfg.CallbackURL, cfg.Scopes, cfg.UserAgent)
 	esiClient := esi.New(ssoClient, st, cfg.UserAgent)
-	esiClient.SetLanguage(st.Setting("language"))
+	// Глобальный язык ESI — язык администратора: его берут фоновые
+	// задачи, у которых запроса нет. У страниц язык свой, на
+	// request-scoped view (web.esiFor).
+	esiClient.SetLanguage(st.AdminSetting("language"))
 
 	sdeDB := sde.Open(cfg.SDEPath)
 	defer sdeDB.Close()
@@ -45,7 +48,16 @@ func main() {
 		log.Printf("статическая база %s не найдена — импланты без бонусов (запусти sdeimport)", cfg.SDEPath)
 	}
 
-	srv, err := web.New(ssoClient, esiClient, st, sdeDB)
+	auth := web.AuthConfig{
+		Signup:     cfg.Signup,
+		SessionTTL: time.Duration(cfg.SessionDays) * 24 * time.Hour,
+	}
+	// Пресеты прав со страницы входа: полный «Альт» и узкое
+	// «Производство» (config.Presets, этап 4 плана кабинета).
+	for _, p := range cfg.Presets() {
+		auth.Presets = append(auth.Presets, web.ScopePreset{Key: p.Key, Title: p.Title, Scopes: p.Scopes})
+	}
+	srv, err := web.New(ssoClient, esiClient, st, sdeDB, auth)
 	if err != nil {
 		log.Fatalf("web: %v", err)
 	}
@@ -64,16 +76,22 @@ func main() {
 	// Фоновый сбор для учёта ТМЦ: ESI отдаёт кошельки, контракты и работы
 	// скользящим окном и забывает их. Дев-копия обычно ставит COLLECTOR=off,
 	// чтобы две копии не дублировали трафик (ARCHITECTURE.md, «Две копии»).
-	var scheduler *sched.Scheduler
+	scheduler := sched.New()
+	// Просроченные сессии кабинета: раз в час, строка за строкой.
+	scheduler.Add(sched.Task{
+		Name:  "сессии: чистка просроченных",
+		Every: time.Hour,
+		First: 5 * time.Minute,
+		Run:   func(context.Context) error { return st.PurgeSessions() },
+	})
 	if cfg.Collector {
-		scheduler = sched.New()
 		for _, t := range collect.New(esiClient, st, cfg.ClientID).Tasks() {
 			scheduler.Add(t)
 		}
-		scheduler.Start(ctx)
 	} else {
 		log.Print("сбор данных выключен (COLLECTOR=off)")
 	}
+	scheduler.Start(ctx)
 
 	httpSrv := &http.Server{Addr: cfg.ListenAddr, Handler: srv.Routes()}
 	go func() {
@@ -92,7 +110,5 @@ func main() {
 	if err := httpSrv.Shutdown(shutdown); err != nil {
 		log.Printf("http: %v", err)
 	}
-	if scheduler != nil {
-		scheduler.Stop()
-	}
+	scheduler.Stop()
 }

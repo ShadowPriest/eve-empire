@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -28,7 +30,22 @@ type Config struct {
 	// "full" keeps everything ever read warm in the background, "demand"
 	// only fetches what open pages need — the dev copy next to prod.
 	Refresher string
+	// Signup — политика регистрации кабинетов: кто может завести НОВЫЙ
+	// кабинет, войдя персонажем, которого ещё нет в базе.
+	//   first  — только самый первый вход в пустую базу (по умолчанию);
+	//   open   — любой неизвестный персонаж заводит свой кабинет;
+	//   closed — никто: вход только персонажем, который уже добавлен;
+	//   corp   — кабинет заводит тот, кто состоит в корпорации, где
+	//            есть персонаж администратора (проверяется по публичной
+	//            карточке персонажа после SSO).
+	// Добавление персонажей в СВОЙ кабинет политика не ограничивает.
+	Signup string
+	// SessionDays — срок жизни серверной сессии (куки) в днях.
+	SessionDays int
 }
+
+// signupModes — допустимые значения SIGNUP.
+var signupModes = []string{"first", "open", "closed", "corp"}
 
 // Load reads .env (if present) and then the environment.
 func Load() (*Config, error) {
@@ -44,11 +61,29 @@ func Load() (*Config, error) {
 		UserAgent:    getEnv("ESI_USER_AGENT", "eve-empire/0.1"),
 		Collector:    !isOff(getEnv("COLLECTOR", "on")),
 		Refresher:    getEnv("REFRESHER", "full"),
+		Signup:       strings.ToLower(strings.TrimSpace(getEnv("SIGNUP", "first"))),
 	}
 
 	if c.ClientID == "" || c.ClientSecret == "" {
 		return nil, fmt.Errorf("EVE_CLIENT_ID and EVE_CLIENT_SECRET must be set")
 	}
+
+	known := false
+	for _, m := range signupModes {
+		if c.Signup == m {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return nil, fmt.Errorf("SIGNUP must be one of %s (got %q)", strings.Join(signupModes, "|"), c.Signup)
+	}
+
+	days, err := strconv.Atoi(getEnv("SESSION_DAYS", "90"))
+	if err != nil || days <= 0 {
+		return nil, fmt.Errorf("SESSION_DAYS must be a positive integer (got %q)", os.Getenv("SESSION_DAYS"))
+	}
+	c.SessionDays = days
 
 	scopes := getEnv("EVE_SCOPES", strings.Join(defaultScopes, " "))
 	c.Scopes = strings.Fields(scopes)
@@ -139,6 +174,11 @@ var defaultScopes = []string{
 	"esi-killmails.read_killmails.v1",             // /characters/{id}/killmails/recent/
 }
 
+// DefaultScopes returns the full scope set the cabinet asks for when
+// EVE_SCOPES is not set. Exported for tests that check the map
+// "section → scope" against the real list (internal/web/scopes_test.go).
+func DefaultScopes() []string { return slices.Clone(defaultScopes) }
+
 // isOff reads the usual ways of writing "no" in an .env file.
 func isOff(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
@@ -180,4 +220,57 @@ func loadDotEnv(path string) {
 			os.Setenv(k, v)
 		}
 	}
+}
+
+// ── пресеты прав ─────────────────────────────────────────────────────
+//
+// Вход всегда запрашивает набор прав целиком (решение 4 плана кабинета),
+// поэтому выбор пресета делается ДО редиректа на login.eveonline.com и
+// определяет, что окажется в токене. Что реально пришло — видно из JWT
+// (`claims.scp`) и лежит в `tokens.scopes`; пресет нигде не хранится.
+
+// Ключи пресетов. Подписи рабочие: владелец их ещё переименует.
+const (
+	// PresetAlt — свой альт: полный набор прав кабинета.
+	PresetAlt = "alt"
+	// PresetIndustry — член корпорации: только навыки и производство.
+	PresetIndustry = "industry"
+)
+
+// Preset — набор прав, который можно запросить на входе.
+type Preset struct {
+	Key    string
+	Title  string
+	Scopes []string
+}
+
+// industryScopes — ровно четыре права: публичная карточка, навыки,
+// очередь обучения и производственные задания. Больше кабинету члена
+// корпорации не нужно, и просить больше нельзя.
+var industryScopes = []string{
+	"publicData",
+	"esi-skills.read_skills.v1",
+	"esi-skills.read_skillqueue.v1",
+	"esi-industry.read_character_jobs.v1",
+}
+
+// Presets перечисляет пресеты в порядке показа на странице входа.
+// Полный набор берётся из c.Scopes — то есть уже с учётом EVE_SCOPES.
+func (c *Config) Presets() []Preset {
+	return []Preset{
+		{Key: PresetAlt, Title: "Альт", Scopes: c.Scopes},
+		{Key: PresetIndustry, Title: "Производство", Scopes: industryScopes},
+	}
+}
+
+// PresetScopes возвращает права пресета. Неизвестный ключ — false:
+// подставлять вместо него полный набор нельзя, иначе опечатка в ссылке
+// молча попросит у человека все права.
+func (c *Config) PresetScopes(key string) ([]string, bool) {
+	for _, p := range c.Presets() {
+		if p.Key == key {
+			return p.Scopes, true
+		}
+	}
+	return nil, false
 }

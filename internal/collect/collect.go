@@ -55,7 +55,7 @@ func New(e *esi.Client, st *store.Store, clientID string) *Collector {
 // dead alt and get invalid_grant — noise in the log and load on CCP for
 // a result that cannot change until the owner visits /reauth.
 func (c *Collector) chars() ([]store.Character, error) {
-	all, err := c.Store.Characters()
+	all, err := c.Store.AllCharacters()
 	if err != nil {
 		return nil, err
 	}
@@ -64,19 +64,46 @@ func (c *Collector) chars() ([]store.Character, error) {
 		return all, nil // no way to tell: better to try than to collect nothing
 	}
 	var out []store.Character
-	skipped := 0
+	skipped, narrow := 0, 0
 	for _, ch := range all {
-		if clients[ch.ID] == c.clientID {
-			out = append(out, ch)
+		if clients[ch.ID] != c.clientID {
+			skipped++
 			continue
 		}
-		skipped++
+		// Узкий токен (пресет «Производство») не даёт ни одного из
+		// прав, ради которых существует сбор: спрашивать по нему нечего,
+		// и жаловаться на каждое право по отдельности тоже не о чем.
+		if !collectable(ch) {
+			narrow++
+			continue
+		}
+		out = append(out, ch)
 	}
 	if skipped > 0 && !c.warned["reauth"] {
 		c.warned["reauth"] = true
 		log.Printf("сбор: %d альтов с чужими токенами пропущено — нужен перелогин на /reauth", skipped)
 	}
+	if narrow > 0 && !c.warned["narrow"] {
+		c.warned["narrow"] = true
+		log.Printf("сбор: %d персонажей с узким набором прав пропущено", narrow)
+	}
 	return out, nil
+}
+
+// collectScopes — права, ради которых сбор вообще ходит к персонажу.
+// Нет ни одного — персонажа можно не трогать совсем.
+var collectScopes = []string{
+	scopeWallet, scopeOrders, scopeJobs, scopeBlueprints, scopeAssets, scopeContracts,
+}
+
+// collectable — есть ли у токена хоть одно право, нужное сбору.
+func collectable(ch store.Character) bool {
+	for _, sc := range collectScopes {
+		if ch.Has(sc) {
+			return true
+		}
+	}
+	return false
 }
 
 // Tasks are staggered: a restart must not fire every collector at once

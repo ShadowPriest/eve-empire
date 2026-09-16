@@ -101,7 +101,7 @@ func (s *Server) skillCatalog() map[int64]skillplan.Skill {
 
 func (s *Server) handleSkillPlanner(w http.ResponseWriter, r *http.Request) {
 	ec, stale := s.esiFor(r)
-	data, _, err := s.shell(ec, 0, "")
+	data, _, err := s.shell(r, ec, 0, "")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
@@ -124,12 +124,12 @@ func (s *Server) handleSkillPlanner(w http.ResponseWriter, r *http.Request) {
 		return strings.TrimSpace(r.URL.Query().Get(k))
 	}
 
-	plans, err := s.Store.SkillPlans()
+	plans, err := s.Store.SkillPlans(userFrom(r).ID)
 	if err != nil {
 		errs.add("сохранённые планы", err)
 	}
 	data["Plans"] = plans
-	data["Chars"] = empireChars(data)
+	data["Chars"] = empireCharsFor(data, "/tools/skill-planner")
 
 	text := field("plan")
 	source := field("src") // "" | queue — where the plan comes from
@@ -509,7 +509,7 @@ func (s *Server) handleSkillPlanSave(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/tools/skill-planner", http.StatusSeeOther)
 		return
 	}
-	newID, err := s.Store.SaveSkillPlan(store.SkillPlan{
+	newID, err := s.Store.SaveSkillPlan(userFrom(r).ID, store.SkillPlan{
 		ID: id, Name: name, CharacterID: charID, Body: body,
 	})
 	if err != nil {
@@ -524,7 +524,7 @@ func (s *Server) handleSkillPlanDelete(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	id, _ := strconv.ParseInt(r.FormValue("id"), 10, 64)
 	if id > 0 {
-		if err := s.Store.DeleteSkillPlan(id); err != nil {
+		if err := s.Store.DeleteSkillPlan(userFrom(r).ID, id); err != nil {
 			httpError(w, "deleting plan", err)
 			return
 		}

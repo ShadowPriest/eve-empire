@@ -10,10 +10,10 @@
     Чтобы перейти к другому аккаунту, на странице EVE выберите вход под другой
     учётной записью.
   </p>
-  <p style="margin:0;"><a class="btnlink" href="/login?back=/reauth">Войти ещё</a></p>
+  <p style="margin:0;"><a class="btnlink" href="/login?preset=alt&amp;back=/reauth">Войти ещё</a></p>
   {{else}}
   <p style="margin:0 0 1rem;">Все {{.Total}} персонажей авторизованы этим приложением.</p>
-  <p style="margin:0;"><a class="btnlink" href="/login?back=/reauth">Добавить ещё персонажа</a></p>
+  <p style="margin:0;"><a class="btnlink" href="/login?preset=alt&amp;back=/reauth">Добавить ещё персонажа</a></p>
   {{end}}
 </div>
 
@@ -27,6 +27,7 @@
     <a class="alink" href="/characters/{{.ID}}" style="flex:1;min-width:0;">{{.Name}}</a>
     {{if eq .State "ok"}}<span class="tag" title="токен выдан текущим приложением">готов</span>
     {{else if eq .State "foreign"}}<span class="tag" title="токен выдан другим приложением EVE — обновиться не сможет">нужен вход</span>
+    {{else if eq .State "narrow"}}<span class="tag" title="в токене не все права кабинета — часть вкладок персонажа недоступна">узкий набор</span>
     {{else}}<span class="tag" title="токен сохранён до того, как приложение стали записывать">приложение неизвестно</span>{{end}}
   </div>
   {{end}}

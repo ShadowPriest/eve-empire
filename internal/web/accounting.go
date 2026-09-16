@@ -84,7 +84,7 @@ func (s *Server) handleAccountingBuild(w http.ResponseWriter, r *http.Request) {
 	if source != "adjusted" {
 		source = "average"
 	}
-	res, err := ledger.New(s.Store, s.ESI).WithSDE(s.SDE).BuildAll(source)
+	res, err := ledger.New(s.Store, s.ESI, userFrom(r).ID).WithSDE(s.SDE).BuildAll(source)
 	msg := res.Note
 	if err != nil {
 		msg = "ошибка сборки: " + err.Error()
@@ -113,7 +113,7 @@ type accRecon struct {
 // changes no totals, so being wrong about one is cheap and reversible.
 // A surplus or a shortage moves money, and stays a human decision.
 func (s *Server) handleAccountingRecon(w http.ResponseWriter, r *http.Request) {
-	b := ledger.New(s.Store, s.ESI).WithSDE(s.SDE)
+	b := ledger.New(s.Store, s.ESI, userFrom(r).ID).WithSDE(s.SDE)
 	var msg string
 
 	switch r.FormValue("do") {
@@ -165,9 +165,10 @@ func (s *Server) handleAccountingRecon(w http.ResponseWriter, r *http.Request) {
 
 // handleAccountingClose seals the books before a date.
 func (s *Server) handleAccountingClose(w http.ResponseWriter, r *http.Request) {
+	userID := userFrom(r).ID
 	var msg string
 	if r.FormValue("do") == "open" {
-		if err := s.Store.SetClosedBefore(time.Time{}); err != nil {
+		if err := s.Store.SetClosedBefore(userID, time.Time{}); err != nil {
 			msg = "открыть период: " + err.Error()
 		} else {
 			msg = "период снова открыт — задним числом снова можно"
@@ -176,7 +177,7 @@ func (s *Server) handleAccountingClose(w http.ResponseWriter, r *http.Request) {
 		d, err := time.Parse("2006-01-02", r.FormValue("date"))
 		if err != nil {
 			msg = "не понял дату, нужен формат ГГГГ-ММ-ДД"
-		} else if err := s.Store.SetClosedBefore(d); err != nil {
+		} else if err := s.Store.SetClosedBefore(userID, d); err != nil {
 			msg = "закрыть период: " + err.Error()
 		} else {
 			msg = "период закрыт до " + d.Format("02.01.2006") +
@@ -199,11 +200,12 @@ func (s *Server) accountingPage(w http.ResponseWriter, r *http.Request, msg stri
 	if r.Method == http.MethodPost {
 		stale = nil
 	}
-	data, _, err := s.shell(ec, 0, "accounting")
+	data, _, err := s.shell(r, ec, 0, "accounting")
 	if err != nil {
 		httpError(w, "loading characters", err)
 		return
 	}
+	userID := userFrom(r).ID
 
 	att, err := s.Store.Attention()
 	if err != nil {
@@ -287,7 +289,7 @@ func (s *Server) accountingPage(w http.ResponseWriter, r *http.Request, msg stri
 	}
 	locNames := map[int64]string{}
 	if len(locIDs) > 0 {
-		if ch, err := s.Store.Characters(); err == nil && len(ch) > 0 {
+		if ch, err := s.Store.Characters(userID); err == nil && len(ch) > 0 {
 			locNames = ec.LocationNames(ch[0].ID, locIDs)
 		}
 	}
@@ -391,7 +393,7 @@ func (s *Server) accountingPage(w http.ResponseWriter, r *http.Request, msg stri
 	data["FeesUnmatchedN"] = feeN
 	data["FeesUnmatched"] = feeSum
 
-	closed := s.Store.ClosedBefore()
+	closed := s.Store.ClosedBefore(userID)
 	if !closed.IsZero() {
 		data["ClosedBefore"] = closed.Format("02.01.2006")
 	}

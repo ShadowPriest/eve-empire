@@ -21,6 +21,7 @@ import (
 const (
 	authorizeURL = "https://login.eveonline.com/v2/oauth/authorize"
 	tokenURL     = "https://login.eveonline.com/v2/oauth/token"
+	revokeURL    = "https://login.eveonline.com/v2/oauth/revoke"
 	jwksURL      = "https://login.eveonline.com/oauth/jwks"
 	issuer       = "https://login.eveonline.com"
 	audience     = "EVE Online"
@@ -51,13 +52,18 @@ func New(clientID, clientSecret, callbackURL string, scopes []string, userAgent 
 	}
 }
 
-// AuthorizeURL builds the login.eveonline.com redirect URL.
-func (c *Client) AuthorizeURL(state string) string {
+// AuthorizeURL builds the login.eveonline.com redirect URL for the given
+// set of scopes (the login page picks it by preset — see config.Preset).
+// An empty set means the client's own full set.
+func (c *Client) AuthorizeURL(state string, scopes []string) string {
+	if len(scopes) == 0 {
+		scopes = c.Scopes
+	}
 	q := url.Values{
 		"response_type": {"code"},
 		"redirect_uri":  {c.CallbackURL},
 		"client_id":     {c.ClientID},
-		"scope":         {strings.Join(c.Scopes, " ")},
+		"scope":         {strings.Join(scopes, " ")},
 		"state":         {state},
 	}
 	return authorizeURL + "?" + q.Encode()
@@ -85,6 +91,36 @@ func (c *Client) Refresh(refreshToken string) (*Token, error) {
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
 	})
+}
+
+// Revoke tells the SSO to forget a refresh token. Used when a character
+// logs in with a narrower preset than before: the wide token would
+// otherwise stay valid on CCP's side until it is used again, and the
+// point of the narrow preset is that the cabinet no longer holds those
+// permissions. Callers only log the error — a failed revoke must not
+// break the login itself.
+func (c *Client) Revoke(refreshToken string) error {
+	form := url.Values{
+		"token_type_hint": {"refresh_token"},
+		"token":           {refreshToken},
+	}
+	req, err := http.NewRequest("POST", revokeURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(c.ClientID, c.ClientSecret)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", c.UserAgent)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("sso revoke endpoint: %s", resp.Status)
+	}
+	return nil
 }
 
 func (c *Client) tokenRequest(form url.Values) (*Token, error) {

@@ -58,8 +58,8 @@ func TestAirSyncWalletDays(t *testing.T) {
 		id   int64
 		name string
 	}{{100, "Taxed"}, {200, "CorpOnly"}, {400, "Banked"}} {
-		if _, err := s.db.Exec(`INSERT INTO characters (character_id, name, added_at)
-			VALUES (?, ?, ?)`, c.id, c.name, now.Unix()); err != nil {
+		if _, err := s.db.Exec(`INSERT INTO characters (character_id, name, added_at, user_id)
+			VALUES (?, ?, ?, 1)`, c.id, c.name, now.Unix()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -101,7 +101,7 @@ func TestAirSyncWalletDays(t *testing.T) {
 	journal(100, 0, 100, time.Date(2026, 8, 31, 9, 0, 0, 0, time.UTC), 500, daily)
 	journal(300, 0, 300, day3, 500000, daily)
 
-	wallet, err := s.AirSyncWalletDays(now)
+	wallet, err := s.AirSyncWalletDays(1, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestAirSyncWalletDays(t *testing.T) {
 	if err := s.SetAirDays(400, 3); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AirSyncWalletDays(now); err != nil {
+	if _, err := s.AirSyncWalletDays(1, now); err != nil {
 		t.Fatal(err)
 	}
 	states, _ = s.AirStates()
@@ -140,7 +140,7 @@ func TestAirSyncWalletDays(t *testing.T) {
 		day3.Unix()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AirSyncWalletDays(now); err != nil {
+	if _, err := s.AirSyncWalletDays(1, now); err != nil {
 		t.Fatal(err)
 	}
 	states, _ = s.AirStates()

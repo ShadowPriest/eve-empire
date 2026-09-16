@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -100,6 +101,14 @@ type Client struct {
 	// view collects what happened during one request; nil on the
 	// primary client.
 	view *ViewStatus
+
+	// lang переопределяет язык ESI для одного request-scoped view:
+	// язык — часть URL (?language=ru), а значит и часть ключа кэша,
+	// поэтому у каждого кабинета он может быть свой, не мешая ни кэшу,
+	// ни фоновому обновлению (URL самоописателен).
+	// langSet отличает «кабинет выбрал en» от «переопределения нет».
+	lang    string
+	langSet bool
 }
 
 // ViewStatus is what a request-scoped view reports back to the page.
@@ -107,6 +116,10 @@ type ViewStatus struct {
 	// Page is the request URI the render belongs to; the web layer sets
 	// it so the render can be recorded as that page's dependency set.
 	Page string
+	// UserID — кабинет, которому принадлежит рендер: зависимости страниц
+	// в SSE-хабе ключуются парой (кабинет, страница), иначе чужой рендер
+	// того же пути подменял бы подписку.
+	UserID int64
 
 	stale atomic.Bool
 	mu    sync.Mutex
@@ -170,7 +183,23 @@ func New(ssoClient *sso.Client, st *store.Store, userAgent string) *Client {
 // so switching it naturally refetches localized data.
 func (c *Client) SetLanguage(lang string) { c.st.language.Store(lang) }
 
+// WithLanguage возвращает копию клиента с языком кабинета. Применяется
+// к request-scoped view (esiFor в web): язык попадает в URL, поэтому
+// разные кабинеты просто читают разные ключи кэша, а фоновое обновление
+// работает с любым URL как есть.
+func (c *Client) WithLanguage(lang string) *Client {
+	n := *c
+	n.lang, n.langSet = lang, true
+	return &n
+}
+
 func (c *Client) language() string {
+	if c.langSet {
+		if c.lang != "en" {
+			return c.lang
+		}
+		return ""
+	}
 	if v, ok := c.st.language.Load().(string); ok && v != "en" {
 		return v
 	}
@@ -192,7 +221,9 @@ func (c *Client) Background() *Client {
 	if !c.allowStale {
 		return c
 	}
-	return &Client{st: c.st, allowStale: true, background: true, view: c.view}
+	n := *c
+	n.background = true
+	return &n
 }
 
 func (c *Client) markStale() {
@@ -290,20 +321,23 @@ func (c *Client) getURL(characterID int64, url string, compat bool, out any) (in
 			url += "?language=" + lang
 		}
 	}
+	// Дальше по URL ходит только сеть: кэш, реестр обновления и
+	// склейка одновременных чтений работают по ключу (cacheKey).
+	key := cacheKey(characterID, url)
 	now := time.Now()
 
 	// Memory tier.
 	c.st.mu.Lock()
-	entry, inMem := c.st.cache[url]
+	entry, inMem := c.st.cache[key]
 	c.st.mu.Unlock()
 
 	// SQLite tier.
 	if !inMem {
-		if body, meta, ok := c.st.store.CacheGet(url); ok {
+		if body, meta, ok := c.st.store.CacheGet(key); ok {
 			entry = cacheEntry{body: body, pages: meta.Pages, expires: meta.Expires, fetched: meta.Fetched}
 			inMem = true
 			c.st.mu.Lock()
-			c.st.cache[url] = entry
+			c.st.cache[key] = entry
 			c.st.mu.Unlock()
 		}
 	}
@@ -311,8 +345,8 @@ func (c *Client) getURL(characterID int64, url string, compat bool, out any) (in
 	// Every read registers with the refresher: a page view makes the
 	// entry hot, everything else just keeps it warm. pending: a fetch is
 	// imminent, so the page may call itself stale and poll for it.
-	pending := c.st.reg.touch(url, characterID, compat, entry, inMem, c.allowStale && !c.background)
-	c.noteRead(url)
+	pending := c.st.reg.touch(key, characterID, compat, entry, inMem, c.allowStale && !c.background)
+	c.noteRead(key)
 
 	if inMem {
 		if now.Before(entry.expires) {
@@ -324,7 +358,7 @@ func (c *Client) getURL(characterID int64, url string, compat bool, out any) (in
 			// (sidebar) read or a static kind is not marked stale: the
 			// entry is warm (may legitimately wait several TTLs) or never
 			// refetched, so a poll would only churn.
-			if msg := c.st.reg.failing(url); msg != "" {
+			if msg := c.st.reg.failing(key); msg != "" {
 				c.noteErr(msg)
 			} else if pending {
 				c.markStale()
@@ -334,38 +368,69 @@ func (c *Client) getURL(characterID int64, url string, compat bool, out any) (in
 	} else if c.allowStale {
 		// Nothing cached at all: a stale view must not block on the
 		// network. Report stale so the page polls for the refreshed render.
-		if msg := c.st.reg.failing(url); msg != "" {
+		if msg := c.st.reg.failing(key); msg != "" {
 			return 0, fmt.Errorf("%s", msg)
 		}
 		c.markStale()
 		return 0, fmt.Errorf("нет кэша (данные загружаются)")
 	}
 
-	body, pages, err := c.load(characterID, url, compat)
+	body, pages, err := c.load(characterID, key, compat)
 	if err != nil {
 		return 0, err
 	}
 	return pages, json.Unmarshal(body, out)
 }
 
+// ── ключ кэша ────────────────────────────────────────────────────────
+
+// corpKeyMark — хвост ключа кэша с персонажем: «…#c=<id>».
+//
+// Ответ корпоративной ручки зависит не только от URL, но и от ролей
+// персонажа, чьим токеном её спросили: у одного Director, у другого нет
+// доступа вовсе. Пока ключом был голый URL, кабинет без роли получал из
+// `esi_cache` кошельки корпорации, добытые чужим токеном. Персонаж
+// попадает в ключ только там, где это правда нужно (`/corporations/`):
+// в остальных авторизованных URL он и так стоит в пути.
+const corpKeyMark = "#c="
+
+// cacheKey — под каким ключом эта пара (персонаж, URL) живёт в кэше,
+// реестре обновления и склейке одновременных чтений.
+func cacheKey(characterID int64, rawURL string) string {
+	if characterID == 0 || !strings.Contains(rawURL, "/corporations/") {
+		return rawURL
+	}
+	return rawURL + corpKeyMark + strconv.FormatInt(characterID, 10)
+}
+
+// keyURL снимает с ключа хвост персонажа: в сеть идёт настоящий адрес.
+// Так же ESI Refresher рефетчит свои записи — ключ у него в `entry.url`,
+// персонаж рядом, в `entry.charID`.
+func keyURL(key string) string {
+	if i := strings.Index(key, corpKeyMark); i >= 0 {
+		return key[:i]
+	}
+	return key
+}
+
 // load performs the network fetch with in-flight coalescing: the first
-// caller fetches, concurrent callers of the same URL wait for its result
+// caller fetches, concurrent callers of the same key wait for its result
 // instead of duplicating the request.
-func (c *Client) load(characterID int64, url string, compat bool) ([]byte, int, error) {
+func (c *Client) load(characterID int64, key string, compat bool) ([]byte, int, error) {
 	c.st.mu.Lock()
-	if call, ok := c.st.inflight[url]; ok {
+	if call, ok := c.st.inflight[key]; ok {
 		c.st.mu.Unlock()
 		<-call.done
 		return call.body, call.pages, call.err
 	}
 	call := &inflightCall{done: make(chan struct{})}
-	c.st.inflight[url] = call
+	c.st.inflight[key] = call
 	c.st.mu.Unlock()
 
-	call.body, call.pages, call.err = c.fetch(characterID, url, compat)
+	call.body, call.pages, call.err = c.fetch(characterID, key, compat)
 
 	c.st.mu.Lock()
-	delete(c.st.inflight, url)
+	delete(c.st.inflight, key)
 	c.st.mu.Unlock()
 	close(call.done)
 	return call.body, call.pages, call.err
@@ -375,7 +440,8 @@ func (c *Client) load(characterID int64, url string, compat bool) ([]byte, int, 
 // both cache tiers. The semaphore is taken around the request itself:
 // token refresh happens before (it is the SSO host, not ESI), and the
 // caller-side coalescing above already keeps duplicates out.
-func (c *Client) fetch(characterID int64, url string, compat bool) ([]byte, int, error) {
+func (c *Client) fetch(characterID int64, key string, compat bool) ([]byte, int, error) {
+	url := keyURL(key)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, 0, err
@@ -420,23 +486,23 @@ func (c *Client) fetch(characterID int64, url string, compat bool) ([]byte, int,
 		expires = t
 	}
 	c.st.mu.Lock()
-	old, had := c.st.cache[url]
-	c.st.cache[url] = cacheEntry{body: body, pages: pages, expires: expires, fetched: fetched}
+	old, had := c.st.cache[key]
+	c.st.cache[key] = cacheEntry{body: body, pages: pages, expires: expires, fetched: fetched}
 	c.st.mu.Unlock()
 	// Most refreshes bring back the same bytes (a sleeping alt's wallet
 	// does not move): then only the deadline is renewed — no blob write,
 	// no page event.
 	changed := !had || !bytes.Equal(old.body, body)
 	if changed {
-		c.st.store.CachePut(url, body, store.CacheMeta{
+		c.st.store.CachePut(key, body, store.CacheMeta{
 			CharID: characterID, Compat: compat, Pages: pages, Expires: expires, Fetched: fetched,
 		})
 	} else {
-		c.st.store.CacheRenew(url, expires, fetched)
+		c.st.store.CacheRenew(key, expires, fetched)
 	}
-	c.st.reg.observe(url, characterID, compat, expires, fetched)
+	c.st.reg.observe(key, characterID, compat, expires, fetched)
 	if changed {
-		c.st.reg.notify(url)
+		c.st.reg.notify(key)
 	}
 
 	return body, pages, nil

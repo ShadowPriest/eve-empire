@@ -62,7 +62,7 @@ func TestJobConsumesAndProduces(t *testing.T) {
 		})
 		expect += float64(need) * unit
 	}
-	if _, err := st.PostDoc(store.Doc{
+	if _, err := st.PostDoc(1, store.Doc{
 		Kind: "opening", OwnerID: owner, At: opened, Src: "opening",
 		SrcID: "1001",
 	}, lines, nil); err != nil {
@@ -83,7 +83,7 @@ func TestJobConsumesAndProduces(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := New(st, nil).Jobs(sdeDB)
+	res, err := New(st, nil, 1).Jobs(sdeDB)
 	if err != nil {
 		t.Fatalf("проводка работ: %v", err)
 	}
